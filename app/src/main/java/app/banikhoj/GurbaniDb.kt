@@ -1,8 +1,7 @@
 package app.banikhoj
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
-import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -10,111 +9,90 @@ data class Line(val gurmukhi: String, val english: String)
 data class SearchResult(val lineId: String, val gurmukhi: String, val english: String)
 data class Bani(val id: String, val nameGuru: String, val nameLatin: String)
 
+/**
+ * Thin JNI wrapper over the native Rust core (`rust/` crate, libgurbanidb.so).
+ * The native side owns the SQLite handle plus an in-memory Gurmukhi index used
+ * for substring search; results cross the boundary as small JSON strings.
+ */
 object GurbaniDb {
 
-    const val TEXT_ASSET = "JSDS"
-    const val EN_ASSET = "DSSK"
+    init {
+        System.loadLibrary("gurbanidb")
+    }
 
-    private var db: SQLiteDatabase? = null
     private val lock = Any()
+    private var ready = false
 
-    fun get(context: Context): SQLiteDatabase {
+    /**
+     * Ensures the database is available and the native index is loaded.
+     * Copies the XZ-compressed asset to private storage on first run; the
+     * native layer decompresses and opens it. Safe to call repeatedly.
+     */
+    fun open(context: Context): Boolean {
         synchronized(lock) {
-            db?.let { return it }
-            val out = context.getDatabasePath("gurbani.db")
-            if (!out.exists()) {
-                out.parentFile?.mkdirs()
+            if (ready) return true
+            val db = context.getDatabasePath("gurbani.db")
+            val xz = File(db.parentFile, "gurbani.db.xz")
+            val existed = db.exists()
+            if (!existed) {
+                xz.parentFile?.mkdirs()
                 context.assets.open("databases/master.sqlite.xz").use { input ->
-                    XZCompressorInputStream(input.buffered()).use { xz ->
-                        out.outputStream().buffered().use { output -> xz.copyTo(output) }
-                    }
+                    xz.outputStream().buffered().use { output -> input.copyTo(output) }
                 }
             }
-            return SQLiteDatabase.openDatabase(
-                out.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS
-            ).also { db = it }
+            ready = nativeInit(db.path, xz.path)
+            if (!ready && !existed) {
+                // Avoid leaving a truncated DB behind after a failed first launch.
+                db.delete()
+            }
+            return ready
         }
     }
 
     fun search(q: String, limit: Int = 100): List<SearchResult> {
         if (q.isBlank()) return emptyList()
-        val d = db ?: return emptyList()
-        val out = mutableListOf<SearchResult>()
-        d.rawQuery(
-            """
-            SELECT al.line_id AS id, al.data AS gurmukhi,
-                   COALESCE(en.data, '') AS english
-            FROM asset_lines al
-            LEFT JOIN asset_lines en
-                   ON en.line_id = al.line_id AND en.asset_id = ? AND en.type = 'translation'
-            WHERE al.asset_id = ? AND al.type = 'primary' AND al.data LIKE '%' || ? || '%'
-            ORDER BY al.rowid
-            LIMIT ?
-            """.trimIndent(),
-            arrayOf(EN_ASSET, TEXT_ASSET, q, limit.toString())
-        ).use { c ->
-            while (c.moveToNext()) {
-                out += SearchResult(c.getString(0), c.getString(1), c.getString(2))
-            }
+        val arr = JSONArray(nativeSearch(q.trim(), limit))
+        return List(arr.length()) { i ->
+            val o = arr.getJSONObject(i)
+            SearchResult(o.getString("id"), o.getString("gu"), o.getString("en"))
         }
-        return out
     }
 
-    fun shabadOf(lineId: String): List<Line> {
-        val d = db ?: return emptyList()
-        val out = mutableListOf<Line>()
-        d.rawQuery(
-            """
-            SELECT al.data AS gurmukhi, COALESCE(en.data, '') AS english
-            FROM lines l
-            JOIN asset_lines al ON al.line_id = l.id AND al.asset_id = ? AND al.type = 'primary'
-            LEFT JOIN asset_lines en ON en.line_id = l.id AND en.asset_id = ? AND en.type = 'translation'
-            WHERE l.line_group_id = (SELECT line_group_id FROM lines WHERE id = ?)
-            ORDER BY l.line_group_order
-            """.trimIndent(),
-            arrayOf(TEXT_ASSET, EN_ASSET, lineId)
-        ).use { c ->
-            while (c.moveToNext()) out += Line(c.getString(0), c.getString(1))
-        }
-        return out
-    }
+    fun shabadOf(lineId: String): List<Line> =
+        nativeShabad(lineId).toPairs().map { Line(it.first, it.second) }
 
     fun banis(): List<Bani> {
-        val d = db ?: return emptyList()
-        val out = mutableListOf<Bani>()
-        d.rawQuery("SELECT id, name FROM banis", null).use { c ->
-            while (c.moveToNext()) {
-                val json = c.getString(1)
-                runCatching {
-                    val o = JSONObject(json)
-                    Bani(c.getString(0), o.optString("Guru", ""), o.optString("Latn", ""))
-                }.onSuccess { out += it }
-            }
+        val arr = JSONArray(nativeBanis())
+        return List(arr.length()) { i ->
+            val pair = arr.getJSONArray(i)
+            val json = pair.getString(1)
+            val o = runCatching { JSONObject(json) }.getOrNull()
+            Bani(pair.getString(0), o?.optString("Guru").orEmpty(), o?.optString("Latn").orEmpty())
         }
-        return out
     }
 
-    fun baniLines(baniId: String): List<Line> {
-        val d = db ?: return emptyList()
-        val out = mutableListOf<Line>()
-        d.rawQuery(
-            """
-            SELECT al.data AS gurmukhi, COALESCE(en.data, '') AS english
-            FROM bani_lines bl
-            JOIN lines l ON l.id = bl.line_id
-            JOIN asset_lines al ON al.line_id = l.id AND al.asset_id = ? AND al.type = 'primary'
-            LEFT JOIN asset_lines en ON en.line_id = l.id AND en.asset_id = ? AND en.type = 'translation'
-            WHERE bl.bani_id = ?
-            ORDER BY bl.section_order, bl.line_order
-            """.trimIndent(),
-            arrayOf(TEXT_ASSET, EN_ASSET, baniId)
-        ).use { c ->
-            while (c.moveToNext()) out += Line(c.getString(0), c.getString(1))
-        }
-        return out
-    }
+    fun baniLines(baniId: String): List<Line> =
+        nativeBani(baniId).toPairs().map { Line(it.first, it.second) }
 
     fun close() {
-        synchronized(lock) { db?.close(); db = null }
+        synchronized(lock) {
+            nativeClose()
+            ready = false
+        }
     }
+
+    private fun String.toPairs(): List<Pair<String, String>> {
+        val arr = JSONArray(this)
+        return List(arr.length()) { i ->
+            val p = arr.getJSONArray(i)
+            p.optString(0) to p.optString(1)
+        }
+    }
+
+    private external fun nativeInit(dbPath: String, xzPath: String): Boolean
+    private external fun nativeSearch(query: String, limit: Int): String
+    private external fun nativeBanis(): String
+    private external fun nativeShabad(lineId: String): String
+    private external fun nativeBani(baniId: String): String
+    private external fun nativeClose()
 }

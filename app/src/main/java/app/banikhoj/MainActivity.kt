@@ -87,9 +87,7 @@ class MainActivity : ComponentActivity() {
 fun App() {
     val ctx = LocalContext.current
     val ready by produceState<Boolean?>(null) {
-        value = withContext(Dispatchers.IO) {
-            runCatching { GurbaniDb.get(ctx) }.isSuccess
-        }
+        value = withContext(Dispatchers.IO) { GurbaniDb.open(ctx) }
     }
 
     val scheme =

@@ -1,1 +1,4 @@
-# Keep nothing extra: app uses framework SQLite and org.json (platform APIs).
+# Keep native entry points referenced from libgurbanidb.so.
+-keepclasseswithmembernames class app.banikhoj.GurbaniDb {
+    native <methods>;
+}

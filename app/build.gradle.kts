@@ -59,7 +59,31 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.material.icons.core)
-    implementation(libs.commons.compress)
-    implementation(libs.tukaani.xz)
     debugImplementation(libs.androidx.ui.tooling)
+}
+
+// ---- Native Rust core (libgurbanidb.so) ----
+
+val rustJniLibs = layout.buildDirectory.dir("rustJniLibs")
+val rustTargetDir = layout.buildDirectory.dir("rustTarget")
+
+val buildRust by tasks.registering(Exec::class) {
+    workingDir(rootProject.file("rust"))
+    executable("cargo")
+    args(
+        "ndk", "--platform", "26", "-t", "arm64-v8a",
+        "-o", rustJniLibs.get().asFile.absolutePath,
+        "build", "--release", "--locked",
+    )
+    environment("CARGO_TARGET_DIR", rustTargetDir.get().asFile.absolutePath)
+    inputs.files(fileTree(rootProject.file("rust/src")) { include("**/*.rs") }, rootProject.file("rust/Cargo.toml"), rootProject.file("rust/Cargo.lock"))
+    outputs.dir(rustJniLibs)
+}
+
+android {
+    sourceSets["main"].jniLibs.srcDir(rustJniLibs)
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("JniLibFolders") }.configureEach {
+    dependsOn(buildRust)
 }

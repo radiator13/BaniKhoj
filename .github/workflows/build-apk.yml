@@ -17,6 +17,14 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Install Rust toolchain for native core
+        run: |
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --locked
+
+      - name: Select Android NDK
+        run: echo "ANDROID_NDK_HOME=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
+
       - name: Fetch pre-compressed Shabad OS database (not stored in repo)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,5 +68,5 @@ jobs:
             "BaniKhoj-debug-arm64.apk#BaniKhoj-debug (arm64)" \
             "BaniKhoj-release-opt-arm64.apk#BaniKhoj-release-optimized R8+XZ (arm64)" \
             --title "BaniKhoj $TAG" \
-            --notes "Kotlin + Jetpack Compose M3 on Shabad OS SQLite. arm64-v8a only. Release build: R8 minified, resources shrunk, DB shipped XZ-compressed in APK (~158MB → ~45MB), decompressed once on first launch then plain SQLite on disk — zero runtime overhead." \
+            --notes "Kotlin + Jetpack Compose M3 on Shabad OS SQLite, native Rust core (JNI): XZ extraction + in-memory memmem search. arm64-v8a only. Release build: R8 minified, resources shrunk, DB shipped XZ-compressed in APK (~158MB → ~45MB), decompressed once on first launch then plain SQLite on disk — zero runtime overhead." \
             --latest
