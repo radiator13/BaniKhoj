@@ -1,5 +1,6 @@
 //! BaniKhoj native core: XZ extraction, in-memory Gurmukhi index + substring search,
-//! and reader queries. Platform-independent; exercised by examples/cli.rs on host.
+//! reader queries, and a persistent binary index cache for fast relaunches.
+//! Platform-independent; exercised by examples/cli.rs on host.
 
 use memchr::memmem;
 use rusqlite::{Connection, OpenFlags};
@@ -7,8 +8,12 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 pub const EN_ASSET: &str = "DSSK";
+
+const CACHE_MAGIC: &[u8; 4] = b"BKID";
+const CACHE_VERSION: u32 = 3;
 
 pub struct Row {
     pub id: String,
@@ -32,15 +37,29 @@ pub fn xz_extract(xz: &Path, out: &Path) -> std::io::Result<()> {
 }
 
 impl Core {
-    /// Open the SQLite DB read-only and build the in-memory search index.
+    /// Open read-only and build the in-memory search index.
     pub fn open(db_path: &Path) -> Result<Self, String> {
-        let conn = Connection::open_with_flags(
-            db_path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|e| e.to_string())?;
+        let conn = open_conn(db_path)?;
         let rows = build_index(&conn)?;
         Ok(Core { conn, rows })
+    }
+
+    /// Like [`Core::open`], but persists the index to `cache_path` and reloads it
+    /// on subsequent launches when the DB file is unchanged (size + mtime_ns).
+    pub fn open_cached(db_path: &Path, cache_path: &Path) -> Result<Self, String> {
+        let conn = open_conn(db_path)?;
+        let fp = fingerprint(db_path)?;
+        if let Some(rows) = load_cache(cache_path, &fp) {
+            return Ok(Core { conn, rows });
+        }
+        let rows = build_index(&conn)?;
+        write_cache(cache_path, &rows, &fp);
+        Ok(Core { conn, rows })
+    }
+
+    /// Number of indexed lines.
+    pub fn rows_len(&self) -> usize {
+        self.rows.len()
     }
 
     /// Substring search over primary Gurmukhi text, canonical (rowid) order, capped at `limit`.
@@ -56,29 +75,52 @@ impl Core {
             .collect()
     }
 
-    /// All banis as [id, name-json] pairs in table order.
-    pub fn banis(&self) -> Vec<(String, String)> {
+    /// All banis in table order as (id, name-json, has_english_majority).
+    /// A bani counts as translatable when most of its lines carry an EN_ASSET translation.
+    pub fn banis(&self) -> Vec<(String, String, bool)> {
         let mut out = Vec::new();
-        let mut stmt = match self.conn.prepare("SELECT id, name FROM banis") {
-            Ok(s) => s,
-            Err(_) => return out,
-        };
-        if let Ok(mut rows) = stmt.query([]) {
-            while let Ok(Some(r)) = rows.next() {
-                if let (Ok(id), Ok(name)) = (r.get::<_, String>(0), r.get::<_, String>(1)) {
-                    out.push((id, name));
+
+        // Coverage of DSSK translations per bani (one grouped scan).
+        let mut covered: HashMap<String, i64> = HashMap::new();
+        let sql = "
+            SELECT bl.bani_id, COUNT(*), COALESCE(SUM(en.line_id IS NOT NULL), 0)
+            FROM bani_lines bl
+            LEFT JOIN asset_lines en ON en.line_id = bl.line_id AND en.asset_id = ?1
+                  AND en.type = 'translation'
+            GROUP BY bl.bani_id";
+        if let Ok(mut stmt) = self.conn.prepare(sql) {
+            if let Ok(mut rows) = stmt.query([EN_ASSET]) {
+                while let Ok(Some(r)) = rows.next() {
+                    if let (Ok(id), Ok(total), Ok(tr)) =
+                        (r.get::<_, String>(0), r.get::<_, i64>(1), r.get::<_, i64>(2))
+                    {
+                        if tr * 2 > total {
+                            covered.insert(id, tr);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Ok(mut stmt) = self.conn.prepare("SELECT id, name FROM banis") {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Ok(Some(r)) = rows.next() {
+                    if let (Ok(id), Ok(name)) = (r.get::<_, String>(0), r.get::<_, String>(1)) {
+                        let has_en = covered.contains_key(&id);
+                        out.push((id, name, has_en));
+                    }
                 }
             }
         }
         out
     }
 
-    /// Lines of the shabad (line group) that `line_id` belongs to.
-    pub fn shabad(&self, line_id: &str) -> Vec<(String, String)> {
-        read_pairs(
+    /// Lines of the shabad (line group) that `line_id` belongs to: (gurmukhi, english, section).
+    pub fn shabad(&self, line_id: &str) -> Vec<(String, String, String)> {
+        read_triples(
             &self.conn,
             r#"
-            SELECT COALESCE(p.data, ''), COALESCE(en.data, '')
+            SELECT COALESCE(p.data, ''), COALESCE(en.data, ''), ''
             FROM lines l
             JOIN asset_lines p ON p.line_id = l.id AND p.type = 'primary'
                   AND NOT EXISTS (
@@ -95,14 +137,16 @@ impl Core {
         )
     }
 
-    /// Ordered lines of a bani (Nitnem etc.).
-    pub fn bani(&self, bani_id: &str) -> Vec<(String, String)> {
-        read_pairs(
+    /// Ordered lines of a bani (Nitnem etc.): (gurmukhi, english, section name).
+    pub fn bani(&self, bani_id: &str) -> Vec<(String, String, String)> {
+        read_triples(
             &self.conn,
             r#"
-            SELECT COALESCE(p.data, ''), COALESCE(en.data, '')
+            SELECT COALESCE(p.data, ''), COALESCE(en.data, ''), COALESCE(sec.name, '')
             FROM bani_lines bl
             JOIN lines l ON l.id = bl.line_id
+            JOIN line_groups lg ON lg.id = l.line_group_id
+            LEFT JOIN sections sec ON sec.id = lg.section_id
             JOIN asset_lines p ON p.line_id = l.id AND p.type = 'primary'
                   AND NOT EXISTS (
                         SELECT 1 FROM asset_lines q
@@ -119,11 +163,19 @@ impl Core {
     }
 }
 
-fn read_pairs<P: rusqlite::Params>(
+fn open_conn(db_path: &Path) -> Result<Connection, String> {
+    Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn read_triples<P: rusqlite::Params>(
     conn: &Connection,
     sql: &str,
     params: P,
-) -> Vec<(String, String)> {
+) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
     let mut stmt = match conn.prepare(sql) {
         Ok(s) => s,
@@ -134,9 +186,10 @@ fn read_pairs<P: rusqlite::Params>(
         Err(_) => return out,
     };
     while let Ok(Some(r)) = rows.next() {
-        let gu: String = r.get(0).unwrap_or_default();
-        let en: String = r.get(1).unwrap_or_default();
-        out.push((gu, en));
+        let col = |i: usize| -> String {
+            r.get::<_, Option<String>>(i).ok().flatten().unwrap_or_default()
+        };
+        out.push((col(0), col(1), col(2)));
     }
     out
 }
@@ -178,6 +231,101 @@ fn build_index(conn: &Connection) -> Result<Vec<Row>, String> {
     Ok(rows)
 }
 
+// ---------- Binary index cache ----------
+
+fn fingerprint(db_path: &Path) -> Result<(u64, u64), String> {
+    let md = std::fs::metadata(db_path).map_err(|e| e.to_string())?;
+    let mtime = md
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    Ok((md.len(), mtime))
+}
+
+fn put_u32(v: &mut Vec<u8>, x: u32) {
+    v.extend_from_slice(&x.to_le_bytes());
+}
+
+struct Cursor<'a> {
+    b: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
+        let end = self.pos.checked_add(n)?;
+        if end > self.b.len() {
+            return None;
+        }
+        let s = &self.b[self.pos..end];
+        self.pos = end;
+        Some(s)
+    }
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+    }
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+    fn string(&mut self) -> Option<String> {
+        let len = self.u32()? as usize;
+        Some(String::from_utf8_lossy(self.take(len)?).into_owned())
+    }
+}
+
+fn load_cache(path: &Path, fp: &(u64, u64)) -> Option<Vec<Row>> {
+    let buf = std::fs::read(path).ok()?;
+    let mut c = Cursor { b: &buf, pos: 0 };
+    if c.take(4)? != CACHE_MAGIC || c.u32()? != CACHE_VERSION {
+        return None;
+    }
+    if c.u64()? != fp.0 || c.u64()? != fp.1 {
+        return None;
+    }
+    let count = c.u32()? as usize;
+    let mut rows = Vec::with_capacity(count.min(200_000));
+    for _ in 0..count {
+        let id = c.string()?;
+        let gu = c.string()?;
+        let en = if c.u32()? == 1 { c.string()? } else { String::new() };
+        rows.push(Row { id, gu, en });
+    }
+    Some(rows)
+}
+
+fn write_cache(path: &Path, rows: &[Row], fp: &(u64, u64)) {
+    let mut v = Vec::with_capacity(1 << 20);
+    v.extend_from_slice(CACHE_MAGIC);
+    put_u32(&mut v, CACHE_VERSION);
+    v.extend_from_slice(&fp.0.to_le_bytes());
+    v.extend_from_slice(&fp.1.to_le_bytes());
+    put_u32(&mut v, rows.len() as u32);
+    for r in rows {
+        put_u32(&mut v, r.id.len() as u32);
+        v.extend_from_slice(r.id.as_bytes());
+        put_u32(&mut v, r.gu.len() as u32);
+        v.extend_from_slice(r.gu.as_bytes());
+        if r.en.is_empty() {
+            put_u32(&mut v, 0);
+        } else {
+            put_u32(&mut v, 1);
+            put_u32(&mut v, r.en.len() as u32);
+            v.extend_from_slice(r.en.as_bytes());
+        }
+    }
+    // Atomic-ish replace so a crash never leaves a torn cache.
+    let tmp = path.with_extension("idx.tmp");
+    if File::create(&tmp)
+        .and_then(|mut f| f.write_all(&v))
+        .and_then(|_| std::fs::rename(&tmp, path))
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
 // ---------- JSON helpers (tiny, no serde) ----------
 
 pub fn esc(s: &str) -> String {
@@ -196,9 +344,10 @@ pub fn esc(s: &str) -> String {
     o
 }
 
-pub fn pairs_json(v: &[(String, String)]) -> String {
+/// [[gurmukhi, english, section], ...]
+pub fn triples_json(v: &[(String, String, String)]) -> String {
     let mut o = String::from("[");
-    for (i, (gu, en)) in v.iter().enumerate() {
+    for (i, (gu, en, sec)) in v.iter().enumerate() {
         if i > 0 {
             o.push(',');
         }
@@ -206,26 +355,9 @@ pub fn pairs_json(v: &[(String, String)]) -> String {
         o.push_str(&esc(gu));
         o.push_str("\",\"");
         o.push_str(&esc(en));
+        o.push_str("\",\"");
+        o.push_str(&esc(sec));
         o.push_str("\"]");
-    }
-    o.push(']');
-    o
-}
-
-pub struct SearchJson<'a>(pub &'a [&'a Row]);
-pub fn search_json(rows: SearchJson) -> String {
-    let mut o = String::from("[");
-    for (i, r) in rows.0.iter().enumerate() {
-        if i > 0 {
-            o.push(',');
-        }
-        o.push_str("{\"id\":\"");
-        o.push_str(&esc(&r.id));
-        o.push_str("\",\"gu\":\"");
-        o.push_str(&esc(&r.gu));
-        o.push_str("\",\"en\":\"");
-        o.push_str(&esc(&r.en));
-        o.push_str("\"}");
     }
     o.push(']');
     o

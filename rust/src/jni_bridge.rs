@@ -6,7 +6,7 @@ use jni::JNIEnv;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::{pairs_json, search_json, xz_extract, Core, SearchJson};
+use crate::{triples_json, xz_extract, Core};
 
 static STATE: Mutex<Option<Core>> = Mutex::new(None);
 
@@ -27,14 +27,14 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeInit(
     _class: JClass,
     db_path: JString,
     xz_path: JString,
+    idx_path: JString,
 ) -> jboolean {
-    let db: PathBuf = match env.get_string(&db_path) {
-        Ok(s) => s.to_string_lossy().into_owned().into(),
-        Err(_) => return 0,
+    let mut get = |s: &JString| -> Option<PathBuf> {
+        env.get_string(s).ok().map(|v| v.to_string_lossy().into_owned().into())
     };
-    let xz: PathBuf = match env.get_string(&xz_path) {
-        Ok(s) => s.to_string_lossy().into_owned().into(),
-        Err(_) => return 0,
+    let (db, xz, idx) = match (get(&db_path), get(&xz_path), get(&idx_path)) {
+        (Some(d), Some(x), Some(i)) => (d, x, i),
+        _ => return 0,
     };
 
     if !db.exists() {
@@ -47,7 +47,7 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeInit(
         let _ = std::fs::remove_file(&xz);
     }
 
-    match Core::open(&db) {
+    match Core::open_cached(&db, &idx) {
         Ok(core) => {
             if let Ok(mut g) = STATE.lock() {
                 *g = Some(core);
@@ -67,7 +67,12 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSearch<'l>(
 ) -> JString<'l> {
     let query = env.get_string(&q).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let out = with_core(
-        |c| search_json(SearchJson(&c.search(&query, limit.max(0) as usize))),
+        |c| {
+            let hits = c.search(&query, limit.max(0) as usize);
+            let triples: Vec<(String, String, String)> =
+                hits.iter().map(|r| (r.gu.clone(), r.en.clone(), String::new())).collect();
+            triples_json(&triples)
+        },
         "[]".to_string(),
     );
     jstr(&mut env, out)
@@ -78,10 +83,10 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeBanis<'l>(
     mut env: JNIEnv<'l>,
     _class: JClass,
 ) -> JString<'l> {
-    // [[id, name-json], ...] — Kotlin parses the name JSON.
+    // [[id, name-json, has-en(0|1)], ...] — Kotlin parses the name JSON.
     let pairs = with_core(|c| c.banis(), Vec::new());
     let mut o = String::from("[");
-    for (i, (id, name)) in pairs.iter().enumerate() {
+    for (i, (id, name, has_en)) in pairs.iter().enumerate() {
         if i > 0 {
             o.push(',');
         }
@@ -89,6 +94,8 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeBanis<'l>(
         o.push_str(&crate::esc(id));
         o.push_str("\",");
         o.push_str(name); // name is itself JSON straight from the DB
+        o.push(',');
+        o.push_str(if *has_en { "1" } else { "0" });
         o.push(']');
     }
     o.push(']');
@@ -102,7 +109,7 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeShabad<'l>(
     line_id: JString,
 ) -> JString<'l> {
     let id = env.get_string(&line_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let out = with_core(|c| pairs_json(&c.shabad(&id)), "[]".to_string());
+    let out = with_core(|c| triples_json(&c.shabad(&id)), "[]".to_string());
     jstr(&mut env, out)
 }
 
@@ -113,7 +120,7 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeBani<'l>(
     bani_id: JString,
 ) -> JString<'l> {
     let id = env.get_string(&bani_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let out = with_core(|c| pairs_json(&c.bani(&id)), "[]".to_string());
+    let out = with_core(|c| triples_json(&c.bani(&id)), "[]".to_string());
     jstr(&mut env, out)
 }
 
