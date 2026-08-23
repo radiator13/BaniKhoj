@@ -45,7 +45,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -291,16 +290,10 @@ fun BanisGrid(modifier: Modifier = Modifier, onOpen: (Screen) -> Unit) {
 
     Column(modifier) {
         Text(
-            "NITNEM & BANIS",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 20.dp, top = 6.dp, bottom = 2.dp)
-        )
-        Text(
             "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
         )
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
@@ -376,10 +369,6 @@ fun ResultsList(
                     modifier = Modifier
                         .clickable { onOpen(Screen.Shabad(r.lineId)) }
                 )
-                HorizontalDivider(
-                    Modifier.padding(horizontal = 20.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
             }
         }
     }
@@ -396,8 +385,8 @@ private fun isWesternPunct(c: Char): Boolean =
     c in ";.,:-" || c in "₀₁₂₃₄₅₆₇₈₉"
 
 /**
- * Renders Gurmukhi with colour-coded punctuation:
- * traditional marks (॥ । visraam) in primary colour, western (; . , :) dimmed.
+ * Renders Gurmukhi where the *word* carrying a mark gets the colour, not the mark:
+ * traditional marks (॥ । visraam) tint their word primary, western (; . , :) dim theirs.
  */
 @Composable
 fun GurmukhiText(
@@ -411,31 +400,56 @@ fun GurmukhiText(
     val tradColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
     val westColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
     val annotated = remember(text, tradColor, westColor) {
+        val n = text.length
+        val tag = IntArray(n) // 0 plain, 1 traditional-word, 2 western-word
+
+        fun cls(c: Char): Int = when {
+            isTraditionalMark(c) -> 1
+            isWesternPunct(c) -> 2
+            else -> 0
+        }
+
+        var i = 0
+        while (i < n) {
+            val k = cls(text[i])
+            if (k == 0) {
+                i++
+                continue
+            }
+            var j = i + 1
+            while (j < n && cls(text[j]) == k) j++
+
+            // Walk back from the mark through its word (skipping one gap if needed),
+            // colouring only the word — the punctuation itself stays plain.
+            var s = j - 1
+            var sawWord = false
+            while (s >= 0) {
+                val ch = text[s]
+                if (tag[s] != 0) break          // already claimed by another mark
+                if (ch == ' ') { if (sawWord) break; s--; continue }
+                if (cls(ch) == k) { s--; continue } // the mark run itself
+                if (cls(ch) != 0) break         // boundary of another mark class
+                s--
+                sawWord = true
+            }
+            if (sawWord) {
+                for (t in (s + 1) until i) tag[t] = k
+            }
+            i = j
+        }
+
         buildAnnotatedString {
-            var i = 0
-            val n = text.length
-            while (i < n) {
-                val c = text[i]
-                when {
-                    isTraditionalMark(c) -> {
-                        var j = i + 1
-                        while (j < n && isTraditionalMark(text[j])) j++
-                        withStyle(SpanStyle(color = tradColor)) { append(text, i, j) }
-                        i = j
-                    }
-                    isWesternPunct(c) -> {
-                        var j = i + 1
-                        while (j < n && isWesternPunct(text[j])) j++
-                        withStyle(SpanStyle(color = westColor)) { append(text, i, j) }
-                        i = j
-                    }
-                    else -> {
-                        var j = i + 1
-                        while (j < n && !isTraditionalMark(text[j]) && !isWesternPunct(text[j])) j++
-                        append(text, i, j)
-                        i = j
-                    }
+            var p = 0
+            while (p < n) {
+                val cur = tag[p]
+                var q = p + 1
+                while (q < n && tag[q] == cur) q++
+                when (cur) {
+                    1 -> withStyle(SpanStyle(color = tradColor)) { append(text, p, q) }
+                    2 -> withStyle(SpanStyle(color = westColor)) { append(text, p, q) }
+                    else -> append(text, p, q)
                 }
+                p = q
             }
         }
     }
