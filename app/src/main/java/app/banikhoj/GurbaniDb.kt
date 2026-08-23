@@ -25,7 +25,7 @@ object GurbaniDb {
             if (!out.exists()) {
                 out.parentFile?.mkdirs()
                 context.assets.open("databases/master.sqlite.xz").use { input ->
-                    XZInputStream(input.buffered()).use { xz ->
+                    XZCompressorInputStream(input.buffered()).use { xz ->
                         out.outputStream().buffered().use { output -> xz.copyTo(output) }
                     }
                 }
