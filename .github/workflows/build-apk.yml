@@ -24,22 +24,33 @@ jobs:
           mkdir -p app/src/main/assets/databases
           gh release download -R radiator13/shabados \
             --pattern "master.sqlite" \
-            --output app/src/main/assets/databases/master.sqlite \
+            --output /tmp/master.sqlite \
             --clobber
+          xz -9e -T0 --keep --stdout /tmp/master.sqlite \
+            > app/src/main/assets/databases/master.sqlite.xz
           ls -lh app/src/main/assets/databases/
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.7.1"
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon
+      - name: Build debug + optimized release APKs (arm64-v8a)
+        run: |
+          gradle :app:assembleDebug :app:assembleRelease --no-daemon
+          ls -lh app/build/outputs/apk/debug app/build/outputs/apk/release
+
+      - name: Rename APKs
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk BaniKhoj-debug-arm64.apk
+          cp app/build/outputs/apk/release/app-release.apk BaniKhoj-release-opt-arm64.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: banikhoj-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: banikhoj-apks
+          path: |
+            BaniKhoj-debug-arm64.apk
+            BaniKhoj-release-opt-arm64.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -48,7 +59,8 @@ jobs:
         run: |
           TAG="v$(date +%Y%m%d)-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" \
-            "app/build/outputs/apk/debug/app-debug.apk#BaniKhoj-debug.apk" \
+            "BaniKhoj-debug-arm64.apk#BaniKhoj-debug (arm64)" \
+            "BaniKhoj-release-opt-arm64.apk#BaniKhoj-release-optimized R8+XZ (arm64)" \
             --title "BaniKhoj $TAG" \
-            --notes "Kotlin + Jetpack Compose (Material 3) Gurbani app bundling the latest Shabad OS master.sqlite. Debug-signed APK." \
+            --notes "Kotlin + Jetpack Compose M3 on Shabad OS SQLite. arm64-v8a only. Release build: R8 minified, resources shrunk, DB XZ-compressed (~158MB → ~45MB in-APK), decompressed on first launch. Debug-signed." \
             --latest

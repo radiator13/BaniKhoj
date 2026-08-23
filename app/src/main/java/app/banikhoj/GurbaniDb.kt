@@ -2,6 +2,7 @@ package app.banikhoj
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import org.apache.commons.compress.compressors.xz.XZInputStream
 import org.json.JSONObject
 import java.io.File
 
@@ -23,8 +24,10 @@ object GurbaniDb {
             val out = context.getDatabasePath("gurbani.db")
             if (!out.exists()) {
                 out.parentFile?.mkdirs()
-                context.assets.open("databases/master.sqlite").use { input ->
-                    out.outputStream().use { output -> input.copyTo(output) }
+                context.assets.open("databases/master.sqlite.xz").use { input ->
+                    XZInputStream(input.buffered()).use { xz ->
+                        out.outputStream().buffered().use { output -> xz.copyTo(output) }
+                    }
                 }
             }
             return SQLiteDatabase.openDatabase(
