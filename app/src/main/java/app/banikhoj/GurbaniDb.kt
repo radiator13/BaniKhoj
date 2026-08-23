@@ -2,7 +2,7 @@ package app.banikhoj
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import org.apache.commons.compress.compressors.xz.XZInputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import org.json.JSONObject
 import java.io.File
 

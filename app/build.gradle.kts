@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "app.banikhoj"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "app.banikhoj"
