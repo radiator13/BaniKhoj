@@ -59,5 +59,6 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.commons.compress)
+    implementation(libs.tukaani.xz)
     debugImplementation(libs.androidx.ui.tooling)
 }
