@@ -11,20 +11,18 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 pub const CACHE_MAGIC: &[u8; 4] = b"BKID";
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 
 /// Translation sources per language, in fallback order.
 pub const EN_CHAIN: &[&str] = &["DSSK", "DSKO", "SBMS"];
 pub const PA_CHAIN: &[&str] = &["PSST", "NKFT", "RSJD"];
-pub const ES_CHAIN: &[&str] = &["SNST"];
 
-const ALL_SOURCES: &[&str] = &["DSSK", "DSKO", "SBMS", "PSST", "NKFT", "RSJD", "SNST"];
+const ALL_SOURCES: &[&str] = &["DSSK", "DSKO", "SBMS", "PSST", "NKFT", "RSJD"];
 
 #[derive(Default, Clone)]
 pub struct Translations {
     pub en: String,
     pub pa: String,
-    pub es: String,
 }
 
 impl Translations {
@@ -156,7 +154,7 @@ impl Core {
             JOIN line_groups lg ON lg.id = l.line_group_id
             LEFT JOIN sections sec ON sec.id = lg.section_id
             LEFT JOIN asset_lines en ON en.line_id = l.id AND en.type = 'translation'
-                  AND en.asset_id IN ('DSSK','DSKO','SBMS','PSST','NKFT','RSJD','SNST')
+                  AND en.asset_id IN ('DSSK','DSKO','SBMS','PSST','NKFT','RSJD')
             WHERE l.line_group_id = (SELECT line_group_id FROM lines WHERE id = ?1)
             ORDER BY l.line_group_order
             ",
@@ -181,7 +179,7 @@ impl Core {
                           AND (q.priority < p.priority
                                OR (q.priority = p.priority AND q.rowid < p.rowid)))
             LEFT JOIN asset_lines en ON en.line_id = l.id AND en.type = 'translation'
-                  AND en.asset_id IN ('DSSK','DSKO','SBMS','PSST','NKFT','RSJD','SNST')
+                  AND en.asset_id IN ('DSSK','DSKO','SBMS','PSST','NKFT','RSJD')
             WHERE bl.bani_id = ?1
             ORDER BY bl.section_order, bl.line_order
             ",
@@ -250,7 +248,6 @@ fn read_lines<P: rusqlite::Params>(
             let tr = Translations {
                 en: Translations::pick(&a.t, EN_CHAIN),
                 pa: Translations::pick(&a.t, PA_CHAIN),
-                es: Translations::pick(&a.t, ES_CHAIN),
             };
             (a.gu, tr, a.sec)
         })
@@ -309,7 +306,6 @@ fn build_index(conn: &Connection) -> Result<Vec<Row>, String> {
                 tr: Translations {
                     en: Translations::pick(&t, EN_CHAIN),
                     pa: Translations::pick(&t, PA_CHAIN),
-                    es: Translations::pick(&t, ES_CHAIN),
                 },
             });
         }
@@ -377,8 +373,7 @@ fn load_cache(path: &Path, fp: &(u64, u64)) -> Option<Vec<Row>> {
         let gu = c.string()?;
         let en = if c.u32()? == 1 { c.string()? } else { String::new() };
         let pa = if c.u32()? == 1 { c.string()? } else { String::new() };
-        let es = if c.u32()? == 1 { c.string()? } else { String::new() };
-        rows.push(Row { id, gu, tr: Translations { en, pa, es } });
+        rows.push(Row { id, gu, tr: Translations { en, pa } });
     }
     Some(rows)
 }
@@ -395,7 +390,7 @@ fn write_cache(path: &Path, rows: &[Row], fp: &(u64, u64)) {
             put_u32(&mut v, s.len() as u32);
             v.extend_from_slice(s.as_bytes());
         }
-        for t in [&r.tr.en, &r.tr.pa, &r.tr.es] {
+        for t in [&r.tr.en, &r.tr.pa] {
             if t.is_empty() {
                 put_u32(&mut v, 0);
             } else {
@@ -464,7 +459,7 @@ pub fn lines_json(v: &[(String, Translations, String)]) -> String {
         o.push_str(&esc(gu));
         o.push_str("\",{");
         let mut wrote = false;
-        for (k, val) in [("en", &tr.en), ("pa", &tr.pa), ("es", &tr.es)] {
+        for (k, val) in [("en", &tr.en), ("pa", &tr.pa)] {
             if val.is_empty() {
                 continue;
             }

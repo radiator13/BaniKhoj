@@ -37,10 +37,10 @@ fn main() {
             let shabad = core.shabad(&h.id);
             let (gu, tr, _) = &shabad[0];
             println!(
-                "  first: {gu}\n    en: {} | pa: {} | es: {}\n    shabad({} lines)",
+                "  first: {gu}\n    en: {} | pa: {}\n    shabad({} lines)",
                 &tr.en[..tr.en.len().min(50)],
                 &tr.pa[..tr.pa.len().min(30)],
-                &tr.es[..tr.es.len().min(30)],
+
                 shabad.len()
             );
         }
@@ -51,9 +51,8 @@ fn main() {
         let lines = core.bani(bid);
         let with_en = lines.iter().filter(|(_, t, _)| !t.en.is_empty()).count();
         let with_pa = lines.iter().filter(|(_, t, _)| !t.pa.is_empty()).count();
-        let with_es = lines.iter().filter(|(_, t, _)| !t.es.is_empty()).count();
         println!(
-            "bani {bid} ({expect}): {} lines | en={with_en} pa={with_pa} es={with_es}",
+            "bani {bid} ({expect}): {} lines | en={with_en} pa={with_pa}",
             lines.len()
         );
         if let Some((gu, tr, sec)) = lines.first() {

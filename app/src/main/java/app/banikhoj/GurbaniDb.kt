@@ -9,21 +9,18 @@ data class Line(
     val gurmukhi: String,
     val english: String = "",
     val punjabi: String = "",
-    val spanish: String = "",
     val section: String = ""
 ) {
     fun translation(lang: ReaderLang): String = when (lang) {
         ReaderLang.EN -> english
         ReaderLang.PA -> punjabi
-        ReaderLang.ES -> spanish
     }
 }
 
 /** Reader translation languages, in cycle order. */
 enum class ReaderLang(val code: String, val label: String) {
     EN("en", "EN"),
-    PA("pa", "ਪੰ"),
-    ES("es", "ES");
+    PA("pa", "ਪੰ");
 }
 data class SearchResult(val lineId: String, val gurmukhi: String, val english: String)
 data class Bani(val id: String, val nameGuru: String, val nameLatin: String, val hasEnglish: Boolean)
@@ -117,7 +114,6 @@ object GurbaniDb {
                 gurmukhi = p.optString(0),
                 english = tr?.optString("en").orEmpty(),
                 punjabi = tr?.optString("pa").orEmpty(),
-                spanish = tr?.optString("es").orEmpty(),
                 section = prettySection(p.optString(2))
             )
         }
