@@ -33,7 +33,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as listItems
@@ -284,31 +283,10 @@ private fun SearchField(
     }
 }
 
-private sealed interface GridEntry {
-    data class Header(val title: String, val caption: String) : GridEntry
-    data class Cell(val bani: Bani) : GridEntry
-}
-
 @Composable
 fun BanisGrid(modifier: Modifier = Modifier, onOpen: (Screen) -> Unit) {
     val banis by produceState<List<Bani>>(emptyList()) {
         value = withContext(Dispatchers.IO) { GurbaniDb.banis() }
-    }
-
-    // Group by English availability: Guru Granth Sahib banis vs Dasam/others.
-    val entries = remember(banis) {
-        buildList {
-            val withEn = banis.filter { it.hasEnglish }
-            val withoutEn = banis.filterNot { it.hasEnglish }
-            if (withEn.isNotEmpty()) {
-                add(GridEntry.Header("SRI GURU GRANTH SAHIB JI", "English available"))
-                withEn.forEach { add(GridEntry.Cell(it)) }
-            }
-            if (withoutEn.isNotEmpty()) {
-                add(GridEntry.Header("SRI DASAM GRANTH & OTHERS", "No English translation"))
-                withoutEn.forEach { add(GridEntry.Cell(it)) }
-            }
-        }
     }
 
     Column(modifier) {
@@ -331,41 +309,10 @@ fun BanisGrid(modifier: Modifier = Modifier, onOpen: (Screen) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.weight(1f)
         ) {
-            items(
-                entries,
-                key = {
-                    when (it) {
-                        is GridEntry.Header -> "hdr_${it.title}"
-                        is GridEntry.Cell -> "bani_${it.bani.id}"
-                    }
-                },
-                span = { GridItemSpan(if (it is GridEntry.Header) 2 else 1) },
-                contentType = { it::class.simpleName }
-            ) { e ->
-                when (e) {
-                    is GridEntry.Header -> GroupHeader(e.title, e.caption)
-                    is GridEntry.Cell -> BaniCard(e.bani, onOpen)
-                }
+            items(banis, key = { it.id }) { b ->
+                BaniCard(b, onOpen)
             }
         }
-    }
-}
-
-@Composable
-private fun GroupHeader(title: String, caption: String) {
-    Column(Modifier.padding(top = 14.dp, start = 4.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.5.sp,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Text(
-            caption,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 
@@ -502,11 +449,6 @@ fun GurmukhiText(
     )
 }
 
-private sealed interface ReaderItem {
-    data class Header(val title: String) : ReaderItem
-    data class Body(val line: Line) : ReaderItem
-}
-
 private const val MIN_FONT_SCALE = 0.55f
 private const val MAX_FONT_SCALE = 2.4f
 
@@ -544,19 +486,6 @@ fun ReaderScreen(title: String, dbKey: String, loader: (String) -> List<Line>) {
         fontScale = (fontScale * zoom).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
     }
 
-    val items = remember(lines) {
-        buildList {
-            var lastSection: String? = null
-            lines.forEach { l ->
-                if (l.section.isNotBlank() && l.section != lastSection) {
-                    add(ReaderItem.Header(l.section))
-                    lastSection = l.section
-                }
-                add(ReaderItem.Body(l))
-            }
-        }
-    }
-
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -583,35 +512,26 @@ fun ReaderScreen(title: String, dbKey: String, loader: (String) -> List<Line>) {
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(items.size) { i ->
-                    when (val item = items[i]) {
-                        is ReaderItem.Header -> Text(
-                            item.title,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = if (i > 0) 12.dp else 0.dp)
+                items(lines.size) { i ->
+                    val line = lines[i]
+                    Column {
+                        GurmukhiText(
+                            line.gurmukhi,
+                            fontSize = (23 * fontScale).sp,
+                            lineHeight = (40 * fontScale).sp,
                         )
-                        is ReaderItem.Body -> Column {
-                            GurmukhiText(
-                                item.line.gurmukhi,
-                                fontSize = (23 * fontScale).sp,
-                                lineHeight = (40 * fontScale).sp,
-                            )
-                            val tr = currentLang?.let { item.line.translation(it) }.orEmpty()
-                            if (tr.isNotBlank()) {
-                                Spacer(Modifier.height((5 * fontScale).dp))
-                                Row {
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(
-                                        tr,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontSize = (15 * fontScale).sp,
-                                        lineHeight = (22 * fontScale).sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                        val tr = currentLang?.let { line.translation(it) }.orEmpty()
+                        if (tr.isNotBlank()) {
+                            Spacer(Modifier.height((5 * fontScale).dp))
+                            Row {
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    tr,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontSize = (15 * fontScale).sp,
+                                    lineHeight = (22 * fontScale).sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
