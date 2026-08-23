@@ -6,3 +6,4 @@ local.properties
 
 # Rust build artifacts
 rust/target/
+rust/cli-index.cache
