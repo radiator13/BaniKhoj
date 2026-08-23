@@ -11,20 +11,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Backspace
-
 private val ROW_1 = listOf("ੳ", "ਅ", "ੲ", "ਸ", "ਹ", "ਕ", "ਖ", "ਗ", "ਘ", "ਙ")
 private val ROW_2 = listOf("ਚ", "ਛ", "ਜ", "ਝ", "ਞ", "ਟ", "ਠ", "ਡ", "ਢ", "ਣ")
 private val ROW_3 = listOf("ਤ", "ਥ", "ਦ", "ਧ", "ਨ", "ਪ", "ਫ", "ਬ", "ਭ", "ਮ")
@@ -48,7 +43,7 @@ fun GurmukhiKeyboard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 ROW_6.forEach { KeyCap(it, Modifier.weight(1f)) { onKey(it) } }
                 WideKey("\u2423", Modifier.weight(2.4f)) { onKey(" ") }
-                KeyIcon(Icons.AutoMirrored.Filled.Backspace, Modifier.weight(2.4f)) { onBackspace() }
+                KeyCap("\u232B", Modifier.weight(2.4f), onClick = onBackspace)
             }
             Spacer(Modifier.height(2.dp))
         }
@@ -102,24 +97,6 @@ private fun WideKey(label: String, modifier: Modifier = Modifier, onClick: () ->
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(label, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun KeyIcon(icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shadowElevation = 1.dp,
-        modifier = modifier.clickable(onClick = onClick)
-    ) {
-        Column(
-            Modifier.padding(vertical = 9.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(icon, contentDescription = "Backspace",
-                tint = MaterialTheme.colorScheme.onSecondaryContainer)
         }
     }
 }

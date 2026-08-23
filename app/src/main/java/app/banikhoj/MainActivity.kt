@@ -35,7 +35,6 @@ import androidx.compose.foundation.lazy.items as listItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -254,10 +253,12 @@ private fun SearchField(
                     modifier = Modifier.clickable(onClick = onClear).size(20.dp)
                 )
             }
-            IconButton(onClick = onToggleKeyboard, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    Icons.Filled.Keyboard, contentDescription = "Toggle keyboard",
-                    tint = if (keyboardOn) MaterialTheme.colorScheme.primary
+            IconButton(onClick = onToggleKeyboard, modifier = Modifier.size(30.dp)) {
+                Text(
+                    "\u2328",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (keyboardOn) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
