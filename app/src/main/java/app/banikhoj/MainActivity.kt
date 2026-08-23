@@ -61,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -372,7 +373,6 @@ private fun GroupHeader(title: String, caption: String) {
 private fun BaniCard(b: Bani, onOpen: (Screen) -> Unit) {
     Card(
         onClick = { onOpen(Screen.Bani(b.id, b.nameGuru.ifBlank { b.nameLatin })) },
-        modifier = Modifier.animateItem()
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(
@@ -516,7 +516,21 @@ fun ReaderScreen(title: String, dbKey: String, loader: (String) -> List<Line>) {
     val lines by produceState<List<Line>>(emptyList(), dbKey) {
         value = withContext(Dispatchers.IO) { loader(dbKey) }
     }
-    var showTranslation by rememberSaveable { mutableStateOf(true) }
+
+    // Translation languages actually available for this content; cycle off → EN → PA → ES.
+    val availableLangs = remember(lines) {
+        ReaderLang.entries.filter { lang -> lines.any { it.translation(lang).isNotBlank() } }
+    }
+    var langSel by rememberSaveable(dbKey) { mutableIntStateOf(-1) }
+    val currentLang = if (langSel in availableLangs.indices) availableLangs[langSel] else null
+    fun cycleLang() {
+        if (availableLangs.isEmpty()) return
+        langSel = if (langSel + 1 >= availableLangs.size) -1 else langSel + 1
+    }
+    // Default to the first available translation once content loads.
+    LaunchedEffect(availableLangs) {
+        if (langSel == -1 && availableLangs.isNotEmpty() && dbKey.isNotBlank()) langSel = 0
+    }
 
     // Pinch-to-zoom scales the reading font size.
     var fontScale by rememberSaveable { mutableFloatStateOf(1f) }
@@ -550,12 +564,13 @@ fun ReaderScreen(title: String, dbKey: String, loader: (String) -> List<Line>) {
                     Text(title, fontSize = 21.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 actions = {
-                    IconButton(onClick = { showTranslation = !showTranslation }) {
+                    IconButton(onClick = { cycleLang() }) {
                         Text(
-                            if (showTranslation) "EN" else "ਗੁ",
+                            currentLang?.label ?: "ਗੁ",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = if (currentLang != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -584,12 +599,13 @@ fun ReaderScreen(title: String, dbKey: String, loader: (String) -> List<Line>) {
                                 fontSize = (23 * fontScale).sp,
                                 lineHeight = (40 * fontScale).sp,
                             )
-                            if (showTranslation && item.line.english.isNotBlank()) {
+                            val tr = currentLang?.let { item.line.translation(it) }.orEmpty()
+                            if (tr.isNotBlank()) {
                                 Spacer(Modifier.height((5 * fontScale).dp))
                                 Row {
                                     Spacer(Modifier.width(12.dp))
                                     Text(
-                                        item.line.english,
+                                        tr,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontSize = (15 * fontScale).sp,
                                         lineHeight = (22 * fontScale).sp,

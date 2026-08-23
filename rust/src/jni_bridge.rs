@@ -6,7 +6,7 @@ use jni::JNIEnv;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::{triples_json, xz_extract, Core};
+use crate::{lines_json, search_json, xz_extract, Core};
 
 static STATE: Mutex<Option<Core>> = Mutex::new(None);
 
@@ -69,9 +69,7 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSearch<'l>(
     let out = with_core(
         |c| {
             let hits = c.search(&query, limit.max(0) as usize);
-            let triples: Vec<(String, String, String)> =
-                hits.iter().map(|r| (r.gu.clone(), r.en.clone(), String::new())).collect();
-            triples_json(&triples)
+            search_json(&hits)
         },
         "[]".to_string(),
     );
@@ -109,7 +107,7 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeShabad<'l>(
     line_id: JString,
 ) -> JString<'l> {
     let id = env.get_string(&line_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let out = with_core(|c| triples_json(&c.shabad(&id)), "[]".to_string());
+    let out = with_core(|c| lines_json(&c.shabad(&id)), "[]".to_string());
     jstr(&mut env, out)
 }
 
@@ -120,7 +118,7 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeBani<'l>(
     bani_id: JString,
 ) -> JString<'l> {
     let id = env.get_string(&bani_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let out = with_core(|c| triples_json(&c.bani(&id)), "[]".to_string());
+    let out = with_core(|c| lines_json(&c.bani(&id)), "[]".to_string());
     jstr(&mut env, out)
 }
 

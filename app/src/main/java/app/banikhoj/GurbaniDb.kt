@@ -5,7 +5,26 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-data class Line(val gurmukhi: String, val english: String, val section: String = "")
+data class Line(
+    val gurmukhi: String,
+    val english: String = "",
+    val punjabi: String = "",
+    val spanish: String = "",
+    val section: String = ""
+) {
+    fun translation(lang: ReaderLang): String = when (lang) {
+        ReaderLang.EN -> english
+        ReaderLang.PA -> punjabi
+        ReaderLang.ES -> spanish
+    }
+}
+
+/** Reader translation languages, in cycle order. */
+enum class ReaderLang(val code: String, val label: String) {
+    EN("en", "EN"),
+    PA("pa", "ਪੰ"),
+    ES("es", "ES");
+}
 data class SearchResult(val lineId: String, val gurmukhi: String, val english: String)
 data class Bani(val id: String, val nameGuru: String, val nameLatin: String, val hasEnglish: Boolean)
 
@@ -93,7 +112,14 @@ object GurbaniDb {
         val arr = JSONArray(this)
         return List(arr.length()) { i ->
             val p = arr.getJSONArray(i)
-            Line(p.optString(0), p.optString(1), prettySection(p.optString(2)))
+            val tr = p.optJSONObject(1)
+            Line(
+                gurmukhi = p.optString(0),
+                english = tr?.optString("en").orEmpty(),
+                punjabi = tr?.optString("pa").orEmpty(),
+                spanish = tr?.optString("es").orEmpty(),
+                section = prettySection(p.optString(2))
+            )
         }
     }
 
