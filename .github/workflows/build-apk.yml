@@ -40,23 +40,19 @@ jobs:
         with:
           gradle-version: "9.7.1"
 
-      - name: Build debug + optimized release APKs (arm64-v8a)
+      - name: Build signed release APK (arm64-v8a)
         run: |
-          gradle :app:assembleDebug :app:assembleRelease --no-daemon
-          ls -lh app/build/outputs/apk/debug app/build/outputs/apk/release
+          gradle :app:assembleRelease --no-daemon
+          ls -lh app/build/outputs/apk/release
 
-      - name: Rename APKs
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk BaniKhoj-debug-arm64.apk
-          cp app/build/outputs/apk/release/app-release.apk BaniKhoj-release-opt-arm64.apk
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk BaniKhoj-release-opt-arm64.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
           name: banikhoj-apks
-          path: |
-            BaniKhoj-debug-arm64.apk
-            BaniKhoj-release-opt-arm64.apk
+          path: BaniKhoj-release-opt-arm64.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -65,7 +61,6 @@ jobs:
         run: |
           TAG="v$(date +%Y%m%d)-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" \
-            "BaniKhoj-debug-arm64.apk#BaniKhoj-debug (arm64)" \
             "BaniKhoj-release-opt-arm64.apk#BaniKhoj-release-optimized R8+XZ (arm64)" \
             --title "BaniKhoj $TAG" \
             --notes "Kotlin + Jetpack Compose M3 on Shabad OS SQLite, native Rust core (JNI): XZ extraction + in-memory memmem search. arm64-v8a only. Release build: R8 minified, resources shrunk, DB shipped XZ-compressed in APK (~158MB → ~45MB), decompressed once on first launch then plain SQLite on disk — zero runtime overhead." \
