@@ -47,8 +47,8 @@ fun GurmukhiKeyboard(
             KeyRow(ROW_5, onKey)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 ROW_6.forEach { KeyCap(it, Modifier.weight(1f)) { onKey(it) } }
-                WideKey("\u2423") { onKey(" ") }
-                KeyIcon(Icons.AutoMirrored.Filled.Backspace) { onBackspace() }
+                WideKey("\u2423", Modifier.weight(2.4f)) { onKey(" ") }
+                KeyIcon(Icons.AutoMirrored.Filled.Backspace, Modifier.weight(2.4f)) { onBackspace() }
             }
             Spacer(Modifier.height(2.dp))
         }
@@ -90,15 +90,12 @@ private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> 
 }
 
 @Composable
-private fun WideKey(label: String, onClick: () -> Unit) {
+private fun WideKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         shadowElevation = 1.dp,
-        modifier = Modifier
-            .weight(2.4f)
-            .clickable(onClick = onClick)
-            .padding(vertical = 0.dp)
+        modifier = modifier.clickable(onClick = onClick)
     ) {
         Column(
             Modifier.padding(vertical = 10.dp),
@@ -110,12 +107,12 @@ private fun WideKey(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun KeyIcon(icon: ImageVector, onClick: () -> Unit) {
+private fun KeyIcon(icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.secondaryContainer,
         shadowElevation = 1.dp,
-        modifier = Modifier.weight(2.4f).aspectRatio(2.2f).clickable(onClick = onClick)
+        modifier = modifier.clickable(onClick = onClick)
     ) {
         Column(
             Modifier.padding(vertical = 9.dp),
