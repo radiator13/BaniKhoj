@@ -17,17 +17,15 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Fetch Shabad OS database (not stored in repo)
+      - name: Fetch pre-compressed Shabad OS database (not stored in repo)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p app/src/main/assets/databases
           gh release download -R radiator13/shabados \
-            --pattern "master.sqlite" \
-            --output /tmp/master.sqlite \
+            --pattern "master.sqlite.xz" \
+            --output app/src/main/assets/databases/master.sqlite.xz \
             --clobber
-          xz -9e -T0 --keep --stdout /tmp/master.sqlite \
-            > app/src/main/assets/databases/master.sqlite.xz
           ls -lh app/src/main/assets/databases/
 
       - uses: gradle/actions/setup-gradle@v4
@@ -62,5 +60,5 @@ jobs:
             "BaniKhoj-debug-arm64.apk#BaniKhoj-debug (arm64)" \
             "BaniKhoj-release-opt-arm64.apk#BaniKhoj-release-optimized R8+XZ (arm64)" \
             --title "BaniKhoj $TAG" \
-            --notes "Kotlin + Jetpack Compose M3 on Shabad OS SQLite. arm64-v8a only. Release build: R8 minified, resources shrunk, DB XZ-compressed (~158MB → ~45MB in-APK), decompressed on first launch. Debug-signed." \
+            --notes "Kotlin + Jetpack Compose M3 on Shabad OS SQLite. arm64-v8a only. Release build: R8 minified, resources shrunk, DB shipped XZ-compressed in APK (~158MB → ~45MB), decompressed once on first launch then plain SQLite on disk — zero runtime overhead." \
             --latest
