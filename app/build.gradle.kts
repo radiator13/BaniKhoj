@@ -64,19 +64,24 @@ dependencies {
 
 // ---- Native Rust core (libgurbanidb.so) ----
 
-val rustJniLibs = layout.buildDirectory.dir("rustJniLibs")
-val rustTargetDir = layout.buildDirectory.dir("rustTarget")
+val rustDir = rootProject.file("rust")
+val rustJniLibs = File(projectDir, "build/rustJniLibs")
+val rustTargetDir = File(projectDir, "build/rustTarget")
 
 val buildRust by tasks.registering(Exec::class) {
-    workingDir(rootProject.file("rust"))
+    workingDir(rustDir)
     executable("cargo")
     args(
         "ndk", "--platform", "26", "-t", "arm64-v8a",
-        "-o", rustJniLibs.get().asFile.absolutePath,
+        "-o", rustJniLibs.absolutePath,
         "build", "--release", "--locked",
     )
-    environment("CARGO_TARGET_DIR", rustTargetDir.get().asFile.absolutePath)
-    inputs.files(fileTree(rootProject.file("rust/src")) { include("**/*.rs") }, rootProject.file("rust/Cargo.toml"), rootProject.file("rust/Cargo.lock"))
+    environment("CARGO_TARGET_DIR", rustTargetDir.absolutePath)
+    inputs.files(
+        fileTree(File(rustDir, "src")) { include("**/*.rs") },
+        File(rustDir, "Cargo.toml"),
+        File(rustDir, "Cargo.lock"),
+    )
     outputs.dir(rustJniLibs)
 }
 
