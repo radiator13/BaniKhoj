@@ -21,7 +21,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -282,7 +281,7 @@ private fun AppDrawer(
         // Single flat index — every bani lives here together, no source grouping.
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 12.dp, top = 8.dp)
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp)
         ) {
             listItems(banis, key = { it.id }) { b ->
                 val title = b.nameGuru.ifBlank { b.nameLatin }
@@ -765,9 +764,11 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
         val target = (fontScale * gestureScale * zoom).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
         gestureScale = target / fontScale
     }
-    val interacting by zoomState.interactionSource.collectIsDraggedAsState()
-    LaunchedEffect(interacting) {
-        if (!interacting && gestureScale != 1f) {
+    // Pinch events keep restarting this effect while fingers are down;
+    // once they stop, settle into crisp text at the final scale and persist.
+    LaunchedEffect(gestureScale) {
+        if (gestureScale != 1f) {
+            delay(160)
             val target = (fontScale * gestureScale).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
             animate(fontScale, target) { v, _ -> fontScale = v.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE) }
             gestureScale = 1f
