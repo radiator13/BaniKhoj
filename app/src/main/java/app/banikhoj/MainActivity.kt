@@ -10,7 +10,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animate
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -18,9 +17,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,13 +36,16 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as listItems
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -59,6 +58,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -86,14 +86,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyleimport androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -104,7 +103,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
 
 sealed interface Screen {
     data object Home : Screen
@@ -268,6 +266,22 @@ private fun NavBody(
     }
 }
 
+// Curated nitnem order for the drawer — kept distinct from the full home grid.
+private val DAILY_BANI_KEYS = listOf(
+    "japji", "jaap", "savaiye", "chaupai", "rehraas", "rehras", "sohila", "ardaas", "ardas"
+)
+
+/** First bani matching each key, in nitnem order, de-duplicated by id. */
+private fun dailyBanis(banis: List<Bani>): List<Bani> {
+    val out = ArrayList<Bani>()
+    for (key in DAILY_BANI_KEYS) {
+        banis.firstOrNull { b ->
+            (b.nameGuru + " " + b.nameLatin).lowercase().contains(key)
+        }?.let { picked -> if (out.none { it.id == picked.id }) out.add(picked) }
+    }
+    return out
+}
+
 @Composable
 private fun AppDrawer(
     current: Screen,
@@ -278,22 +292,36 @@ private fun AppDrawer(
     Column(Modifier.fillMaxSize()) {
         DrawerHeader()
 
-        // Single flat index — every bani lives here together, no source grouping.
-        LazyColumn(
-            Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp)
-        ) {
-            listItems(banis, key = { it.id }) { b ->
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            label = { Text("ਖੋਜ · Search") },
+            selected = current is Screen.Home,
+            onClick = { onNavigate(Screen.Home) },
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        )
+
+        Spacer(Modifier.height(10.dp))
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+        Text(
+            "ਨਿੱਤ ਨੇਮ · Daily",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
+        )
+        Column(Modifier.padding(horizontal = 12.dp)) {
+            dailyBanis(banis).forEach { b ->
                 val title = b.nameGuru.ifBlank { b.nameLatin }
                 NavigationDrawerItem(
                     label = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     selected = current is Screen.Bani && current.id == b.id,
                     onClick = { onNavigate(Screen.Bani(b.id, title)) },
-                    modifier = Modifier.padding(vertical = 1.dp)
+                    modifier = Modifier.padding(vertical = 2.dp)
                 )
             }
         }
 
+        Spacer(Modifier.weight(1f))
         HorizontalDivider(Modifier.padding(horizontal = 16.dp))
         NavigationDrawerItem(
             icon = { Icon(Icons.Filled.Info, contentDescription = null) },
@@ -351,7 +379,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
         text = {
             Text(
                 "Gurbani search & reader.\nVersion $version\n\n" +
-                    "Pinch or double-tap to zoom the Gurbani text.\n" +
+                    "Use + and − buttons to zoom the Gurbani text.\n" +
                     "ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ, ਵਾਹਿਗੁਰੂ ਜੀ ਦੀ ਫ਼ਤਿਹ।"
             )
         }
@@ -457,7 +485,6 @@ private fun SearchField(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clickable { if (!keyboardOn) onToggleKeyboard() }
     ) {
         Row(
             Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
@@ -468,15 +495,34 @@ private fun SearchField(
                 Icons.Filled.Search, contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                query.ifEmpty { "ਗੁਰਮੁਖੀ ਵਿੱਚ ਖੋਜੋ…" },
-                fontSize = 17.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = if (query.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
-            )
+            Box(Modifier.weight(1f)) {
+                if (query.isEmpty()) {
+                    Text(
+                        "ਗੁਰਮੁਖੀ ਵਿੱਚ ਖੋਜੋ…",
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { state ->
+                            // Tapping the field opens the system keyboard;
+                            // hide the built-in panel to avoid two keyboards.
+                            if (state.isFocused && keyboardOn) onToggleKeyboard()
+                        }
+                )
+            }
             if (query.isNotEmpty()) {
                 Icon(
                     Icons.Filled.Close, contentDescription = "Clear",
@@ -637,19 +683,23 @@ fun ResultsList(
 private fun isTraditionalMark(c: Char): Boolean =
     c == '।' || c == '॥' || c == '\uFE00' || c == '\uFE01' || c == '\uFE02' || c == '\uFE03'
 
-/** Western punctuation and footnote digits. */
+/** Western punctuation — hidden from display. */
 private fun isWesternMark(c: Char): Boolean =
-    c in ";.,:" || c in "₀₁₂₃₄₅₆₇₈₉"
+    c in ";.,:"
+
+/** Footnote subscript digits — displayed as-is. */
+private fun isSubscript(c: Char): Boolean =
+    c in "₀₁₂₃₄₅₆₇₈₉"
 
 private fun isAnyMark(c: Char): Boolean =
-    isTraditionalMark(c) || isWesternMark(c)
+    isTraditionalMark(c) || isWesternMark(c) || isSubscript(c)
 
 /**
  * Rendering rules:
- *  - traditional dandas and visraam selectors are kept exactly as written,
- *    with no font or colour change to the word before them;
- *  - western marks (; , . : and footnote digits) are hidden from display,
- *    and the word immediately before them takes the accent colour.
+ *  - traditional dandas, visraam selectors and subscript digits render exactly
+ *    as written, with no font or colour change to the word before them;
+ *  - western marks (; , :) are hidden from display, and the word immediately
+ *    before them takes the accent colour.
  */
 @Composable
 fun GurmukhiText(
@@ -673,10 +723,10 @@ fun GurmukhiText(
             }
             var j = i + 1
             while (j < n && isAnyMark(text[j])) j++
-            val runIsWestern = (i until j).any { isWesternMark(text[it]) }
+            val runHasHidden = (i until j).any { isWesternMark(text[it]) }
 
             // Walk back from the run through its word (skipping one gap if needed).
-            if (runIsWestern) {
+            if (runHasHidden) {
                 var s = j - 1
                 var sawWord = false
                 while (s >= 0) {
@@ -700,7 +750,7 @@ fun GurmukhiText(
                 when {
                     isWesternMark(c) -> { /* glyph hidden */ }
                     accentWord[idx] -> withStyle(SpanStyle(color = accent)) { append(c) }
-                    else -> append(c) // traditional marks render untouched
+                    else -> append(c) // traditional marks & subscripts render untouched
                 }
             }
         }
@@ -745,48 +795,15 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
         if (langSel == -1 && availableLangs.isNotEmpty() && dbKey.isNotBlank()) langSel = 0
     }
 
-    // Zoomable Gurbani: pinch anywhere, double-tap to toggle, level persists.
-    // While pinching only graphicsLayer scales (cheap, no re-layout); text
-    // reflows once, crisply, when the gesture settles.
+    // Dedicated zoom buttons: simple multiplicative steps, persisted instantly.
     var fontScale by rememberSaveable {
         mutableFloatStateOf(prefs.getFloat(KEY_FONT_SCALE, 1f).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE))
     }
-    var gestureScale by remember { mutableFloatStateOf(1f) }
-    val effScale = fontScale * gestureScale
-
-    var showZoomPill by remember { mutableStateOf(false) }
-    LaunchedEffect(effScale) {
-        showZoomPill = true
-        delay(900)
-        showZoomPill = false
-    }
-
-    val zoomState = rememberTransformableState { zoom, _, _ ->
-        val target = (fontScale * gestureScale * zoom).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-        gestureScale = target / fontScale
-    }
-    // Pinch events keep restarting this effect while fingers are down;
-    // once they stop, settle into crisp text at the final scale and persist.
-    LaunchedEffect(gestureScale) {
-        if (gestureScale != 1f) {
-            delay(160)
-            val target = (fontScale * gestureScale).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-            animate(fontScale, target) { v, _ -> fontScale = v.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE) }
-            gestureScale = 1f
-            prefs.edit().putFloat(KEY_FONT_SCALE, fontScale).apply()
-        }
-    }
-
-    val scope = rememberCoroutineScope()
-    val toggleZoom: () -> Unit = {
-        val from = effScale
-        val target = if (from < DOUBLE_TAP_SCALE - 0.05f) DOUBLE_TAP_SCALE else 1f
-        scope.launch {
-            animate(from, target) { v, _ ->
-                fontScale = v.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-                gestureScale = 1f
-            }
-            prefs.edit().putFloat(KEY_FONT_SCALE, fontScale).apply()
+    val stepZoom: (Float) -> Unit = { factor ->
+        val next = (fontScale * factor).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+        if (next != fontScale) {
+            fontScale = next
+            prefs.edit().putFloat(KEY_FONT_SCALE, next).apply()
         }
     }
 
@@ -802,6 +819,12 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
                     }
                 },
                 actions = {
+                    IconButton(onClick = { stepZoom(1f / 1.15f) }) {
+                        Icon(Icons.Filled.Remove, contentDescription = "Zoom out")
+                    }
+                    IconButton(onClick = { stepZoom(1.15f) }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Zoom in")
+                    }
                     IconButton(onClick = { cycleLang() }) {
                         Text(
                             currentLang?.label ?: "ਗੁ",
@@ -820,15 +843,7 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             LazyColumn(
-                Modifier
-                    .fillMaxSize()
-                    .transformable(zoomState)
-                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleZoom() }) }
-                    .graphicsLayer {
-                        val s = fontScale * gestureScale
-                        scaleX = s
-                        scaleY = s
-                    },
+                Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -866,25 +881,6 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
                             }
                         }
                     }
-                }
-            }
-            AnimatedVisibility(
-                visible = showZoomPill,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f),
-                    tonalElevation = 3.dp
-                ) {
-                    Text(
-                        "${(effScale * 100).roundToInt()}%",
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
                 }
             }
         }

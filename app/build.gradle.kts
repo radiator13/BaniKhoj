@@ -25,8 +25,8 @@ android {
         applicationId = "app.banikhoj"
         minSdk = 36
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
 
         ndk {
             abiFilters += "arm64-v8a"
