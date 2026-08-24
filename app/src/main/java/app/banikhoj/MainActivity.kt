@@ -107,6 +107,8 @@ sealed interface Screen {
     data object Home : Screen
     data class Shabad(val lineId: String) : Screen
     data class Bani(val id: String, val title: String) : Screen
+    data class Source(val id: String, val title: String) : Screen
+    data class Section(val id: String, val title: String) : Screen
 }
 
 /** Width (dp) at which the drawer becomes a permanent sidebar. */
@@ -200,6 +202,9 @@ fun Root() {
             seen.values.toList()
         }
     }
+    val sources by produceState<List<GurbaniDb.Source>>(emptyList()) {
+        value = withContext(Dispatchers.IO) { GurbaniDb.sources() }
+    }
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -214,7 +219,7 @@ fun Root() {
     BackHandler(enabled = screen != Screen.Home && !drawerOpen) { screen = Screen.Home }
 
     val drawerContent: @Composable () -> Unit = {
-        AppDrawer(current = screen, banis = banis, onNavigate = navigate, onAbout = { showAbout = true })
+        AppDrawer(current = screen, sources = sources, onNavigate = navigate, onAbout = { showAbout = true })
     }
 
     if (compact) {
@@ -261,30 +266,90 @@ private fun NavBody(
                 ReaderScreen("Shabad", s.lineId, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.shabadOf(it) }
             is Screen.Bani ->
                 ReaderScreen(s.title, s.id, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.baniLines(it) }
+            is Screen.Source ->
+                SourceBrowser(s.id, s.title, onNavigate)
+            is Screen.Section ->
+                ShabadListScreen(s.id, s.title, onNavigate)
         }
     }
 }
 
-// Curated nitnem order for the drawer — kept distinct from the full home grid.
-private val DAILY_BANI_KEYS = listOf(
-    "japji", "jaap", "savaiye", "chaupai", "rehraas", "rehras", "sohila", "ardaas", "ardas"
-)
+// ---------- Browse: source -> sections -> shabads ----------
 
-/** First bani matching each key, in nitnem order, de-duplicated by id. */
-private fun dailyBanis(banis: List<Bani>): List<Bani> {
-    val out = ArrayList<Bani>()
-    for (key in DAILY_BANI_KEYS) {
-        banis.firstOrNull { b ->
-            (b.nameGuru + " " + b.nameLatin).lowercase().contains(key)
-        }?.let { picked -> if (out.none { it.id == picked.id }) out.add(picked) }
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BrowserScaffold(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(title, fontSize = 21.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+            )
+        }
+    ) { pad ->
+        Box(Modifier.padding(pad).fillMaxSize()) { content() }
     }
-    return out
 }
+
+@Composable
+fun SourceBrowser(sourceId: String, title: String, onOpen: (Screen) -> Unit) {
+    val sections by produceState<List<GurbaniDb.Section>>(emptyList(), sourceId) {
+        value = withContext(Dispatchers.IO) { GurbaniDb.sectionsOf(sourceId) }
+    }
+    BrowserScaffold(title = title, onBack = { onOpen(Screen.Home) }) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+        ) {
+            items(sections.size) { i ->
+                val sec = sections[i]
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = {
+                        Text(sec.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    },
+                    modifier = Modifier.clickable { onOpen(Screen.Section(sec.id, sec.title)) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ShabadListScreen(sectionId: String, title: String, onOpen: (Screen) -> Unit) {
+    val shabads by produceState<List<GurbaniDb.ShabadEntry>>(emptyList(), sectionId) {
+        value = withContext(Dispatchers.IO) { GurbaniDb.shabadsOf(sectionId) }
+    }
+    BrowserScaffold(title = title, onBack = { onOpen(Screen.Home) }) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+        ) {
+            items(shabads.size) { i ->
+                val e = shabads[i]
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = {
+                        GurmukhiText(e.gurmukhi, fontSize = 18.sp, lineHeight = 28.sp, maxLines = 2)
+                    },
+                    modifier = Modifier.clickable { onOpen(Screen.Shabad(e.lineId)) }
+                )
+            }
+        }
+    }
+}
+
+// Curated nitnem order — replaced by source-based browsing in the drawer.
 
 @Composable
 private fun AppDrawer(
     current: Screen,
-    banis: List<Bani>,
+    sources: List<GurbaniDb.Source>,
     onNavigate: (Screen) -> Unit,
     onAbout: () -> Unit,
 ) {
@@ -302,25 +367,24 @@ private fun AppDrawer(
         Spacer(Modifier.height(10.dp))
         HorizontalDivider(Modifier.padding(horizontal = 16.dp))
         Text(
-            "ਨਿੱਤ ਨੇਮ · Daily",
+            "ਮੂਲ ਪਾਠ · Sources",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
         )
-        Column(Modifier.padding(horizontal = 12.dp)) {
-            dailyBanis(banis).forEach { b ->
-                val title = b.nameGuru.ifBlank { b.nameLatin }
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            sources.forEach { s ->
+                val title = s.nameGuru.ifBlank { s.nameLatin }
                 NavigationDrawerItem(
                     label = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    selected = current is Screen.Bani && current.id == b.id,
-                    onClick = { onNavigate(Screen.Bani(b.id, title)) },
+                    selected = current is Screen.Source && current.id == s.id,
+                    onClick = { onNavigate(Screen.Source(s.id, title)) },
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
             }
         }
 
-        Spacer(Modifier.weight(1f))
         HorizontalDivider(Modifier.padding(horizontal = 16.dp))
         NavigationDrawerItem(
             icon = { Icon(Icons.Filled.Info, contentDescription = null) },

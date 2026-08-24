@@ -123,6 +123,72 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeBani<'l>(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSources<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass,
+) -> JString<'l> {
+    // [[id, name-json], ...] — Kotlin parses the name JSON.
+    let pairs = with_core(|c| c.sources(), Vec::new());
+    jstr(&mut env, id_name_json(&pairs))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSections<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass,
+    source_id: JString,
+) -> JString<'l> {
+    let id = env.get_string(&source_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let pairs = with_core(|c| c.sections(&id), Vec::new());
+    jstr(&mut env, id_name_json(&pairs))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSectionShabads<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass,
+    section_id: JString,
+) -> JString<'l> {
+    let id = env.get_string(&section_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    // [[line_id, gurmukhi], ...]
+    let pairs = with_core(|c| c.section_shabads(&id), Vec::new());
+    let mut o = String::from("[");
+    for (i, (lid, gu)) in pairs.iter().enumerate() {
+        if i > 0 {
+            o.push(',');
+        }
+        o.push_str("[\"");
+        o.push_str(&crate::esc(lid));
+        o.push_str("\",\"");
+        o.push_str(&crate::esc(gu));
+        o.push_str("\"]");
+    }
+    o.push(']');
+    jstr(&mut env, o)
+}
+
+/// [[id, name-json], ...]
+fn id_name_json(pairs: &[(String, String)]) -> String {
+    let mut o = String::from("[");
+    for (i, (id, name)) in pairs.iter().enumerate() {
+        if i > 0 {
+            o.push(',');
+        }
+        o.push_str("[\"");
+        o.push_str(&crate::esc(id));
+        o.push_str("\",");
+        if name.starts_with('{') {
+            o.push_str(name); // name is itself JSON straight from the DB
+        } else {
+            o.push_str(&format!("\"{}\"", crate::esc(name)));
+        }
+        o.push(']');
+    }
+    o.push(']');
+    o
+}
+
+#[no_mangle]
 pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeClose(_env: JNIEnv, _class: JClass) {
     if let Ok(mut g) = STATE.lock() {
         *g = None;

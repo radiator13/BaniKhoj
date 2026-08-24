@@ -24,6 +24,9 @@ enum class ReaderLang(val code: String, val label: String) {
 }
 data class SearchResult(val lineId: String, val gurmukhi: String, val english: String)
 data class Bani(val id: String, val nameGuru: String, val nameLatin: String, val hasEnglish: Boolean)
+data class Source(val id: String, val nameGuru: String, val nameLatin: String)
+data class Section(val id: String, val title: String)
+data class ShabadEntry(val lineId: String, val gurmukhi: String)
 
 /**
  * Thin JNI wrapper over the native Rust core (`rust/` crate, libgurbanidb.so).
@@ -98,6 +101,41 @@ object GurbaniDb {
     fun baniLines(baniId: String): List<Line> =
         nativeBani(baniId).toLines()
 
+    /** Scriptures (SGGS, Dasam Granth, …) as [id, name-json] pairs. */
+    fun sources(): List<Source> {
+        val arr = JSONArray(nativeSources())
+        return List(arr.length()) { i ->
+            val pair = arr.getJSONArray(i)
+            val o = runCatching { JSONObject(pair.getString(1)) }.getOrNull()
+            Source(
+                id = pair.getString(0),
+                nameGuru = o?.optString("Guru").orEmpty(),
+                nameLatin = o?.optString("Latn").orEmpty(),
+            )
+        }
+    }
+
+    /** Sections of a scripture, in canonical order; titles prefer Gurmukhi when present. */
+    fun sectionsOf(sourceId: String): List<Section> {
+        val arr = JSONArray(nativeSections(sourceId))
+        return List(arr.length()) { i ->
+            val pair = arr.getJSONArray(i)
+            val o = runCatching { JSONObject(pair.getString(1)) }.getOrNull()
+            val guru = o?.optString("Guru").orEmpty().trim()
+            val latn = o?.optString("Latn").orEmpty().trim()
+            Section(pair.getString(0), guru.ifBlank { latn.ifBlank { "?" } })
+        }
+    }
+
+    /** Opening line of every shabad in a section. */
+    fun shabadsOf(sectionId: String): List<ShabadEntry> {
+        val arr = JSONArray(nativeSectionShabads(sectionId))
+        return List(arr.length()) { i ->
+            val p = arr.getJSONArray(i)
+            ShabadEntry(p.getString(0), p.optString(1))
+        }
+    }
+
     fun close() {
         synchronized(lock) {
             nativeClose()
@@ -131,5 +169,8 @@ object GurbaniDb {
     private external fun nativeBanis(): String
     private external fun nativeShabad(lineId: String): String
     private external fun nativeBani(baniId: String): String
+    private external fun nativeSources(): String
+    private external fun nativeSections(sourceId: String): String
+    private external fun nativeSectionShabads(sectionId: String): String
     private external fun nativeClose()
 }

@@ -186,6 +186,69 @@ impl Core {
             [bani_id],
         )
     }
+
+    /// All sources (scriptures) as (id, name-json), table order.
+    pub fn sources(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if let Ok(mut stmt) = self.conn.prepare("SELECT id, COALESCE(name, '') FROM sources") {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Ok(Some(r)) = rows.next() {
+                    if let (Ok(id), Ok(name)) = (r.get::<_, String>(0), r.get::<_, String>(1)) {
+                        out.push((id, name));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Sections belonging to a source as (id, name-json), in source order.
+    pub fn sections(&self, source_id: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT id, COALESCE(name, '') FROM sections WHERE source_id = ?1 ORDER BY source_order",
+        ) {
+            if let Ok(mut rows) = stmt.query([source_id]) {
+                while let Ok(Some(r)) = rows.next() {
+                    if let (Ok(id), Ok(name)) = (r.get::<_, String>(0), r.get::<_, String>(1)) {
+                        out.push((id, name));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// First line id + opening text of every shabad in a section, in order.
+    pub fn section_shabads(&self, section_id: &str) -> Vec<(String, String)> {
+        let sql = "
+            SELECT lg.id, l.id, COALESCE(p.data, '')
+            FROM line_groups lg
+            JOIN lines l ON l.line_group_id = lg.id
+            JOIN asset_lines p ON p.line_id = l.id AND p.type = 'primary'
+                  AND NOT EXISTS (
+                        SELECT 1 FROM asset_lines q
+                        WHERE q.line_id = p.line_id AND q.type = 'primary'
+                          AND (q.priority < p.priority
+                               OR (q.priority = p.priority AND q.rowid < p.rowid)))
+            WHERE lg.section_id = ?1
+            ORDER BY lg.section_order, l.line_group_order";
+        let mut out: Vec<(String, String)> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if let Ok(mut stmt) = self.conn.prepare(sql) {
+            if let Ok(mut rows) = stmt.query([section_id]) {
+                while let Ok(Some(r)) = rows.next() {
+                    let gid: String = match r.get(0) { Ok(v) => v, Err(_) => continue };
+                    if !seen.insert(gid) { continue; } // first line wins per shabad
+                    let lid: String = match r.get(1) { Ok(v) => v, Err(_) => continue };
+                    let gu: String =
+                        r.get::<_, Option<String>>(2).ok().flatten().unwrap_or_default();
+                    out.push((lid, gu));
+                }
+            }
+        }
+        out
+    }
 }
 
 fn open_conn(db_path: &Path) -> Result<Connection, String> {
