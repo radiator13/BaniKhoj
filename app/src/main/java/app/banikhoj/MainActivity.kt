@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -228,14 +227,14 @@ fun Root() {
             drawerState = drawerState,
             drawerContent = { ModalDrawerSheet { drawerContent() } }
         ) {
-            NavBody(screen, banis, sources, showMenu = true, onMenu = { scope.launch { drawerState.open() } },
+            NavBody(screen, sources, showMenu = true, onMenu = { scope.launch { drawerState.open() } },
                 backBlockedByDrawer = drawerOpen, onNavigate = navigate)
         }
     } else {
         PermanentNavigationDrawer(
             drawerContent = { PermanentDrawerSheet { drawerContent() } }
         ) {
-            NavBody(screen, banis, sources, showMenu = false, onMenu = {}, backBlockedByDrawer = false, onNavigate = navigate)
+            NavBody(screen, sources, showMenu = false, onMenu = {}, backBlockedByDrawer = false, onNavigate = navigate)
         }
     }
 
@@ -245,7 +244,6 @@ fun Root() {
 @Composable
 private fun NavBody(
     screen: Screen,
-    banis: List<Bani>,
     sources: List<Source>,
     showMenu: Boolean,
     onMenu: () -> Unit,
@@ -263,7 +261,7 @@ private fun NavBody(
     ) { s ->
         when (s) {
             is Screen.Home ->
-                HomeScreen(showMenu, onMenu, backBlockedByDrawer, banis, sources, onOpen = onNavigate)
+                HomeScreen(showMenu, onMenu, backBlockedByDrawer, sources, onOpen = onNavigate)
             is Screen.Shabad ->
                 ReaderScreen("Shabad", s.lineId, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.shabadOf(it) }
             is Screen.Bani ->
@@ -324,20 +322,43 @@ fun SourceBrowser(sourceId: String, title: String, onOpen: (Screen) -> Unit) {
     }
 }
 
-// Curated nitnem order — the only list shown in the drawer.
-private val DAILY_BANI_KEYS = listOf(
-    "japji", "jaap", "savaiye", "chaupai", "rehraas", "rehras", "sohila", "ardaas", "ardas"
+// Curated nitnem order, grouped by time of day — shown as separate sections
+// in the drawer. Labels are fixed English spellings (not raw DB strings);
+// keys match space-insensitively against Gurmukhi + Latin names.
+private data class NitnemEntry(val key: String, val label: String)
+
+private data class NitnemGroup(val title: String, val entries: List<NitnemEntry>)
+
+private val NITNEM_GROUPS = listOf(
+    NitnemGroup(
+        "Amritvela · Morning",
+        listOf(
+            NitnemEntry("japji", "Japji Sahib"),
+            NitnemEntry("jaap", "Jaap Sahib"),
+            NitnemEntry("savaiye", "Tav Prasad Savaiye"),
+            NitnemEntry("chaupai", "Benti Chaupai Sahib"),
+        )
+    ),
+    NitnemGroup(
+        "Evening · Nitnem",
+        listOf(
+            NitnemEntry("rehras", "Rehras Sahib"),
+            NitnemEntry("sohila", "Sohila Sahib"),
+            NitnemEntry("ardaas", "Ardaas"),
+        )
+    ),
 )
 
-/** First bani matching each key, in nitnem order, de-duplicated by id. */
-private fun dailyBanis(banis: List<Bani>): List<Bani> {
-    val out = ArrayList<Bani>()
-    for (key in DAILY_BANI_KEYS) {
-        banis.firstOrNull { b ->
-            (b.nameGuru + " " + b.nameLatin).lowercase().contains(key)
-        }?.let { picked -> if (out.none { it.id == picked.id }) out.add(picked) }
-    }
-    return out
+/** First unused bani whose name matches [key], in DB order; [taken] de-duplicates across groups.
+ *  Matching ignores spaces so "japji" finds "Jap Ji Sahib". */
+private fun pickBani(banis: List<Bani>, key: String, taken: MutableSet<String>): Bani? {
+    val needle = key.replace(" ", "")
+    val picked = banis.firstOrNull { b ->
+        b.id !in taken &&
+            (b.nameGuru + b.nameLatin).lowercase().replace(" ", "").contains(needle)
+    } ?: return null
+    taken.add(picked.id)
+    return picked
 }
 
 @Composable
@@ -360,22 +381,26 @@ private fun AppDrawer(
 
         Spacer(Modifier.height(10.dp))
         HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-        Text(
-            "ਨਿੱਤ ਨੇਮ",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
-        )
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            dailyBanis(banis).forEach { b ->
-                val title = b.nameGuru.ifBlank { b.nameLatin }
-                NavigationDrawerItem(
-                    label = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    selected = current is Screen.Bani && current.id == b.id,
-                    onClick = { onNavigate(Screen.Bani(b.id, title)) },
-                    modifier = Modifier.padding(vertical = 2.dp)
+            val taken = HashSet<String>()
+            NITNEM_GROUPS.forEach { group ->
+                Text(
+                    group.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
+                group.entries.forEach { entry ->
+                    pickBani(banis, entry.key, taken)?.let { b ->
+                        NavigationDrawerItem(
+                            label = { Text(entry.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            selected = current is Screen.Bani && current.id == b.id,
+                            onClick = { onNavigate(Screen.Bani(b.id, entry.label)) },
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -450,7 +475,6 @@ fun HomeScreen(
     showMenu: Boolean,
     onMenu: () -> Unit,
     drawerOpen: Boolean,
-    banis: List<Bani>?,
     sources: List<Source>,
     onOpen: (Screen) -> Unit,
 ) {
@@ -506,7 +530,7 @@ fun HomeScreen(
                 transitionSpec = { fadeIn() togetherWith fadeOut() }
             ) { idle ->
                 if (idle) {
-                    BanisGrid(Modifier.weight(1f), banis, sources, onOpen = onOpen)
+                    SourcesGrid(Modifier.weight(1f), orderedSources(sources), onOpen = onOpen)
                 } else {
                     ResultsList(
                         results, searching,
@@ -600,10 +624,18 @@ private fun SearchField(
     }
 }
 
+/** Main scriptures lead the front-page grid; the rest keep DB order behind them. */
+private val FEATURED_SOURCE_IDS = listOf("SGGS", "SDGR", "SRBL")
+
+private fun orderedSources(sources: List<Source>): List<Source> =
+    sources.sortedBy { s ->
+        FEATURED_SOURCE_IDS.indexOf(s.id).let { if (it == -1) Int.MAX_VALUE else it }
+    }
+
+/** Front page: one card per scripture in the database — no bani content here. */
 @Composable
-fun BanisGrid(
+fun SourcesGrid(
     modifier: Modifier = Modifier,
-    banis: List<Bani>?,
     sources: List<Source>,
     onOpen: (Screen) -> Unit,
 ) {
@@ -614,7 +646,6 @@ fun BanisGrid(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
         )
-        SourcesRow(sources, onOpen)
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 170.dp),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp),
@@ -622,48 +653,18 @@ fun BanisGrid(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.weight(1f)
         ) {
-            items(banis.orEmpty(), key = { it.id }) { b ->
-                BaniCard(b, onOpen)
-            }
-        }
-    }
-}
-
-/** Scripture chips — the browse-by-source entry point lives on the front page. */
-@Composable
-private fun SourcesRow(sources: List<Source>, onOpen: (Screen) -> Unit) {
-    if (sources.isEmpty()) return
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(sources.size) { i ->
-            val s = sources[i]
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.clickable {
-                    onOpen(Screen.Source(s.id, s.nameGuru.ifBlank { s.nameLatin }))
-                }
-            ) {
-                Text(
-                    s.nameGuru.ifBlank { s.nameLatin },
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
+            items(sources, key = { it.id }) { s ->
+                SourceCard(s, onOpen)
             }
         }
     }
 }
 
 @Composable
-private fun BaniCard(b: Bani, onOpen: (Screen) -> Unit) {
-    val title = b.nameGuru.ifBlank { b.nameLatin }
+private fun SourceCard(s: Source, onOpen: (Screen) -> Unit) {
+    val title = s.nameGuru.ifBlank { s.nameLatin }
     Card(
-        onClick = { onOpen(Screen.Bani(b.id, title)) },
+        onClick = { onOpen(Screen.Source(s.id, title)) },
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
@@ -696,7 +697,7 @@ private fun BaniCard(b: Bani, onOpen: (Screen) -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    b.nameLatin,
+                    s.nameLatin,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
