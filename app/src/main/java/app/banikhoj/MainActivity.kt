@@ -202,7 +202,7 @@ fun Root() {
             seen.values.toList()
         }
     }
-    val sources by produceState<List<GurbaniDb.Source>>(emptyList()) {
+    val sources by produceState<List<Source>>(emptyList()) {
         value = withContext(Dispatchers.IO) { GurbaniDb.sources() }
     }
 
@@ -298,7 +298,7 @@ private fun BrowserScaffold(title: String, onBack: () -> Unit, content: @Composa
 
 @Composable
 fun SourceBrowser(sourceId: String, title: String, onOpen: (Screen) -> Unit) {
-    val sections by produceState<List<GurbaniDb.Section>>(emptyList(), sourceId) {
+    val sections by produceState<List<Section>>(emptyList(), sourceId) {
         value = withContext(Dispatchers.IO) { GurbaniDb.sectionsOf(sourceId) }
     }
     BrowserScaffold(title = title, onBack = { onOpen(Screen.Home) }) {
@@ -322,7 +322,7 @@ fun SourceBrowser(sourceId: String, title: String, onOpen: (Screen) -> Unit) {
 
 @Composable
 fun ShabadListScreen(sectionId: String, title: String, onOpen: (Screen) -> Unit) {
-    val shabads by produceState<List<GurbaniDb.ShabadEntry>>(emptyList(), sectionId) {
+    val shabads by produceState<List<ShabadEntry>>(emptyList(), sectionId) {
         value = withContext(Dispatchers.IO) { GurbaniDb.shabadsOf(sectionId) }
     }
     BrowserScaffold(title = title, onBack = { onOpen(Screen.Home) }) {
@@ -349,7 +349,7 @@ fun ShabadListScreen(sectionId: String, title: String, onOpen: (Screen) -> Unit)
 @Composable
 private fun AppDrawer(
     current: Screen,
-    sources: List<GurbaniDb.Source>,
+    sources: List<Source>,
     onNavigate: (Screen) -> Unit,
     onAbout: () -> Unit,
 ) {
