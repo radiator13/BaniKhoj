@@ -1,8 +1,12 @@
 package app.banikhoj
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +21,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -78,13 +84,36 @@ private fun KeyRow(keys: List<String>, onKey: (String) -> Unit) {
 }
 
 @Composable
-private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun PressableKeySurface(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val bg by animateColorAsState(
+        if (pressed) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+        label = "keyBg"
+    )
+    val elevation by animateDpAsState(if (pressed) 0.dp else 2.dp, label = "keyEl")
     Surface(
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shadowElevation = 2.dp,
-        modifier = modifier.clickable(onClick = onClick)
+        color = bg,
+        shadowElevation = elevation,
+        modifier = modifier.clickable(
+            interactionSource = interaction,
+            indication = null,
+            onClick = onClick
+        )
     ) {
+        content()
+    }
+}
+
+@Composable
+private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    PressableKeySurface(modifier = modifier, onClick = onClick) {
         Column(
             Modifier.padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -101,12 +130,7 @@ private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> 
 
 @Composable
 private fun WideKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shadowElevation = 2.dp,
-        modifier = modifier.clickable(onClick = onClick)
-    ) {
+    PressableKeySurface(modifier = modifier, onClick = onClick) {
         Column(
             Modifier.padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -125,12 +149,7 @@ private fun WideKey(label: String, modifier: Modifier = Modifier, onClick: () ->
 @Composable
 private fun BackspaceKey(modifier: Modifier = Modifier, onClick: () -> Unit) {
     val tint = MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shadowElevation = 2.dp,
-        modifier = modifier.clickable(onClick = onClick)
-    ) {
+    PressableKeySurface(modifier = modifier, onClick = onClick) {
         Column(
             Modifier.padding(vertical = 13.dp),
             horizontalAlignment = Alignment.CenterHorizontally

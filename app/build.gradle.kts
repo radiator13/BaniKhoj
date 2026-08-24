@@ -8,12 +8,25 @@ android {
     namespace = "app.banikhoj"
     compileSdk = 37
 
+    signingConfigs {
+        create("release") {
+            // CI provides a persistent keystore via env vars (GitHub secrets);
+            // locally fall back to the debug key so builds never break.
+            System.getenv("BK_STORE_FILE")?.let { path ->
+                storeFile = File(path)
+                storePassword = System.getenv("BK_STORE_PASSWORD")
+                keyAlias = System.getenv("BK_KEY_ALIAS")
+                keyPassword = System.getenv("BK_KEY_PASSWORD")
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "app.banikhoj"
         minSdk = 36
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -31,7 +44,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (System.getenv("BK_STORE_FILE") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {

@@ -25,6 +25,20 @@ jobs:
       - name: Select Android NDK
         run: echo "ANDROID_NDK_HOME=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
 
+      - name: Restore persistent release signing key
+        env:
+          BK_KEYSTORE_B64: ${{ secrets.BK_KEYSTORE_B64 }}
+          BK_STORE_PASSWORD: ${{ secrets.BK_STORE_PASSWORD }}
+          BK_KEY_PASSWORD: ${{ secrets.BK_KEY_PASSWORD }}
+        run: |
+          echo "$BK_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/banikhoj.keystore"
+          {
+            echo "BK_STORE_FILE=$RUNNER_TEMP/banikhoj.keystore"
+            echo "BK_KEY_ALIAS=banikhoj"
+            echo "BK_STORE_PASSWORD=$BK_STORE_PASSWORD"
+            echo "BK_KEY_PASSWORD=$BK_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       - name: Fetch pre-compressed Shabad OS database (not stored in repo)
         env:
           GH_TOKEN: ${{ github.token }}

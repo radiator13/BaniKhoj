@@ -21,6 +21,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,6 +89,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -136,11 +138,34 @@ fun App() {
     MaterialTheme(colorScheme = scheme) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             when (ready) {
-                null -> Message("Preparing database…")
+                null -> BootGreeting()
                 false -> Message("Could not open the Gurbani database.", isError = true)
                 true -> Root()
             }
         }
+    }
+}
+
+@Composable
+fun BootGreeting() {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("ੴ", fontSize = 46.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Loading Gurbani…",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -166,7 +191,18 @@ fun Root() {
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var showAbout by remember { mutableStateOf(false) }
     val banis by produceState<List<Bani>>(emptyList()) {
-        value = withContext(Dispatchers.IO) { GurbaniDb.banis() }
+        // The Shabad OS master DB lists some banis multiple times (same name,
+        // different ids/sources — e.g. two Rehraas Sahib rows). Merge duplicates,
+        // keeping first appearance and preferring the entry with English.
+        value = withContext(Dispatchers.IO) {
+            val seen = LinkedHashMap<String, Bani>()
+            for (b in GurbaniDb.banis()) {
+                val key = b.nameGuru.ifBlank { b.nameLatin }.trim().lowercase()
+                val existing = seen[key]
+                if (existing == null || (!existing.hasEnglish && b.hasEnglish)) seen[key] = b
+            }
+            seen.values.toList()
+        }
     }
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -244,14 +280,10 @@ private fun AppDrawer(
         DrawerHeader()
 
         // Single flat index — every bani lives here together, no source grouping.
-        Text(
-            "ਬਾਣੀਆਂ",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
-        )
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp)) {
+        LazyColumn(
+            Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 12.dp, top = 8.dp)
+        ) {
             listItems(banis, key = { it.id }) { b ->
                 val title = b.nameGuru.ifBlank { b.nameLatin }
                 NavigationDrawerItem(
@@ -468,28 +500,15 @@ private fun SearchField(
 @Composable
 fun BanisGrid(modifier: Modifier = Modifier, banis: List<Bani>?, onOpen: (Screen) -> Unit) {
     Column(modifier) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
-            Text(
-                "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "ਬਾਣੀ ਚੁਣੋ ਜਾਂ ਉੱਪਰ ਗੁਰਮੁਖੀ ਵਿੱਚ ਖੋਜੋ",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
         Text(
-            "ਬਾਣੀਆਂ",
-            style = MaterialTheme.typography.labelLarge,
+            "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ",
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
         )
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 170.dp),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 6.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.weight(1f)
@@ -615,18 +634,22 @@ fun ResultsList(
 
 // ---------- Punctuation-aware Gurmukhi text ----------
 
-/**
- * Marks whose *preceding word* is emphasised: traditional dandas and Shabad OS
- * visraam selectors, plus western punctuation (; , . :) and footnote digits.
- */
-private fun isMarkChar(c: Char): Boolean =
-    c == '।' || c == '॥' || c == '\uFE00' || c == '\uFE01' || c == '\uFE02' || c == '\uFE03' ||
-        c in ";.,:" || c in "₀₁₂₃₄₅₆₇₈₉"
+/** Traditional dandas and Shabad OS visraam variation selectors. */
+private fun isTraditionalMark(c: Char): Boolean =
+    c == '।' || c == '॥' || c == '\uFE00' || c == '\uFE01' || c == '\uFE02' || c == '\uFE03'
+
+/** Western punctuation and footnote digits. */
+private fun isWesternMark(c: Char): Boolean =
+    c in ";.,:" || c in "₀₁₂₃₄₅₆₇₈₉"
+
+private fun isAnyMark(c: Char): Boolean =
+    isTraditionalMark(c) || isWesternMark(c)
 
 /**
- * Renders Gurmukhi with one uniform rule for every mark — dandas, visraam and
- * western punctuation alike: the mark itself stays plain; the word immediately
- * before it receives the accent colour.
+ * Rendering rules, applied uniformly:
+ *  - every mark glyph is hidden from display;
+ *  - the word before a *western* mark (; , . :) takes the accent colour;
+ *  - the word before a *traditional* visraam keeps the default font.
  */
 @Composable
 fun GurmukhiText(
@@ -637,47 +660,48 @@ fun GurmukhiText(
     fontWeight: FontWeight? = null,
     maxLines: Int = Int.MAX_VALUE,
 ) {
-    val accent = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+    val accent = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
     val annotated = remember(text, accent) {
         val n = text.length
-        val emphasized = BooleanArray(n)
+        val accentWord = BooleanArray(n)
 
         var i = 0
         while (i < n) {
-            if (!isMarkChar(text[i])) {
+            if (!isAnyMark(text[i])) {
                 i++
                 continue
             }
             var j = i + 1
-            while (j < n && isMarkChar(text[j])) j++
+            while (j < n && isAnyMark(text[j])) j++
+            val runIsWestern = (i until j).any { isWesternMark(text[it]) }
 
-            // Walk back from the mark through its word (skipping one gap if needed),
-            // emphasising only the word — the punctuation itself stays plain.
-            var s = j - 1
-            var sawWord = false
-            while (s >= 0) {
-                val ch = text[s]
-                if (emphasized[s]) break          // already claimed by an earlier mark
-                if (ch == ' ') { if (sawWord) break; s--; continue }
-                if (isMarkChar(ch)) { s--; continue } // the mark run itself
-                s--
-                sawWord = true
-            }
-            if (sawWord) {
-                for (t in (s + 1) until i) emphasized[t] = true
+            // Walk back from the run through its word (skipping one gap if needed).
+            if (runIsWestern) {
+                var s = j - 1
+                var sawWord = false
+                while (s >= 0) {
+                    val ch = text[s]
+                    if (accentWord[s]) break          // already claimed by an earlier mark
+                    if (ch == ' ') { if (sawWord) break; s--; continue }
+                    if (isAnyMark(ch)) { s--; continue } // the mark run itself
+                    s--
+                    sawWord = true
+                }
+                if (sawWord) {
+                    for (t in (s + 1) until i) accentWord[t] = true
+                }
             }
             i = j
         }
 
         buildAnnotatedString {
-            var p = 0
-            while (p < n) {
-                val cur = emphasized[p]
-                var q = p + 1
-                while (q < n && emphasized[q] == cur) q++
-                if (cur) withStyle(SpanStyle(color = accent)) { append(text, p, q) }
-                else append(text, p, q)
-                p = q
+            for (idx in text.indices) {
+                val c = text[idx]
+                when {
+                    isAnyMark(c) -> { /* glyph hidden */ }
+                    accentWord[idx] -> withStyle(SpanStyle(color = accent)) { append(c) }
+                    else -> append(c)
+                }
             }
         }
     }
@@ -722,24 +746,46 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
     }
 
     // Zoomable Gurbani: pinch anywhere, double-tap to toggle, level persists.
+    // While pinching only graphicsLayer scales (cheap, no re-layout); text
+    // reflows once, crisply, when the gesture settles.
     var fontScale by rememberSaveable {
         mutableFloatStateOf(prefs.getFloat(KEY_FONT_SCALE, 1f).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE))
     }
+    var gestureScale by remember { mutableFloatStateOf(1f) }
+    val effScale = fontScale * gestureScale
+
     var showZoomPill by remember { mutableStateOf(false) }
-    LaunchedEffect(fontScale) {
+    LaunchedEffect(effScale) {
         showZoomPill = true
         delay(900)
         showZoomPill = false
-        prefs.edit().putFloat(KEY_FONT_SCALE, fontScale).apply()
     }
-    val scope = rememberCoroutineScope()
+
     val zoomState = rememberTransformableState { zoom, _, _ ->
-        fontScale = (fontScale * zoom).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+        val target = (fontScale * gestureScale * zoom).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+        gestureScale = target / fontScale
     }
+    val interacting by zoomState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(interacting) {
+        if (!interacting && gestureScale != 1f) {
+            val target = (fontScale * gestureScale).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+            animate(fontScale, target) { v, _ -> fontScale = v.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE) }
+            gestureScale = 1f
+            prefs.edit().putFloat(KEY_FONT_SCALE, fontScale).apply()
+        }
+    }
+
+    val scope = rememberCoroutineScope()
     val toggleZoom: () -> Unit = {
-        val from = fontScale
-        val target = if (fontScale < DOUBLE_TAP_SCALE - 0.05f) DOUBLE_TAP_SCALE else 1f
-        scope.launch { animate(from, target) { v, _ -> fontScale = v.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE) } }
+        val from = effScale
+        val target = if (from < DOUBLE_TAP_SCALE - 0.05f) DOUBLE_TAP_SCALE else 1f
+        scope.launch {
+            animate(from, target) { v, _ ->
+                fontScale = v.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+                gestureScale = 1f
+            }
+            prefs.edit().putFloat(KEY_FONT_SCALE, fontScale).apply()
+        }
     }
 
     Scaffold(
@@ -775,7 +821,12 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
                 Modifier
                     .fillMaxSize()
                     .transformable(zoomState)
-                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleZoom() }) },
+                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggleZoom() }) }
+                    .graphicsLayer {
+                        val s = fontScale * gestureScale
+                        scaleX = s
+                        scaleY = s
+                    },
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -827,7 +878,7 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
                     tonalElevation = 3.dp
                 ) {
                     Text(
-                        "${(fontScale * 100).roundToInt()}%",
+                        "${(effScale * 100).roundToInt()}%",
                         Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
