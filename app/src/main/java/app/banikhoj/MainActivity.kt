@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -219,7 +220,7 @@ fun Root() {
     BackHandler(enabled = screen != Screen.Home && !drawerOpen) { screen = Screen.Home }
 
     val drawerContent: @Composable () -> Unit = {
-        AppDrawer(current = screen, sources = sources, onNavigate = navigate, onAbout = { showAbout = true })
+        AppDrawer(current = screen, banis = banis, onNavigate = navigate, onAbout = { showAbout = true })
     }
 
     if (compact) {
@@ -227,14 +228,14 @@ fun Root() {
             drawerState = drawerState,
             drawerContent = { ModalDrawerSheet { drawerContent() } }
         ) {
-            NavBody(screen, banis, showMenu = true, onMenu = { scope.launch { drawerState.open() } },
+            NavBody(screen, banis, sources, showMenu = true, onMenu = { scope.launch { drawerState.open() } },
                 backBlockedByDrawer = drawerOpen, onNavigate = navigate)
         }
     } else {
         PermanentNavigationDrawer(
             drawerContent = { PermanentDrawerSheet { drawerContent() } }
         ) {
-            NavBody(screen, banis, showMenu = false, onMenu = {}, backBlockedByDrawer = false, onNavigate = navigate)
+            NavBody(screen, banis, sources, showMenu = false, onMenu = {}, backBlockedByDrawer = false, onNavigate = navigate)
         }
     }
 
@@ -245,6 +246,7 @@ fun Root() {
 private fun NavBody(
     screen: Screen,
     banis: List<Bani>,
+    sources: List<Source>,
     showMenu: Boolean,
     onMenu: () -> Unit,
     backBlockedByDrawer: Boolean,
@@ -261,7 +263,7 @@ private fun NavBody(
     ) { s ->
         when (s) {
             is Screen.Home ->
-                HomeScreen(showMenu, onMenu, backBlockedByDrawer, banis, onOpen = onNavigate)
+                HomeScreen(showMenu, onMenu, backBlockedByDrawer, banis, sources, onOpen = onNavigate)
             is Screen.Shabad ->
                 ReaderScreen("Shabad", s.lineId, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.shabadOf(it) }
             is Screen.Bani ->
@@ -344,12 +346,26 @@ fun ShabadListScreen(sectionId: String, title: String, onOpen: (Screen) -> Unit)
     }
 }
 
-// Curated nitnem order — replaced by source-based browsing in the drawer.
+// Curated nitnem order — the only list shown in the drawer.
+private val DAILY_BANI_KEYS = listOf(
+    "japji", "jaap", "savaiye", "chaupai", "rehraas", "rehras", "sohila", "ardaas", "ardas"
+)
+
+/** First bani matching each key, in nitnem order, de-duplicated by id. */
+private fun dailyBanis(banis: List<Bani>): List<Bani> {
+    val out = ArrayList<Bani>()
+    for (key in DAILY_BANI_KEYS) {
+        banis.firstOrNull { b ->
+            (b.nameGuru + " " + b.nameLatin).lowercase().contains(key)
+        }?.let { picked -> if (out.none { it.id == picked.id }) out.add(picked) }
+    }
+    return out
+}
 
 @Composable
 private fun AppDrawer(
     current: Screen,
-    sources: List<Source>,
+    banis: List<Bani>,
     onNavigate: (Screen) -> Unit,
     onAbout: () -> Unit,
 ) {
@@ -367,19 +383,19 @@ private fun AppDrawer(
         Spacer(Modifier.height(10.dp))
         HorizontalDivider(Modifier.padding(horizontal = 16.dp))
         Text(
-            "ਮੂਲ ਪਾਠ · Sources",
+            "ਨਿੱਤ ਨੇਮ",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
         )
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            sources.forEach { s ->
-                val title = s.nameGuru.ifBlank { s.nameLatin }
+            dailyBanis(banis).forEach { b ->
+                val title = b.nameGuru.ifBlank { b.nameLatin }
                 NavigationDrawerItem(
                     label = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    selected = current is Screen.Source && current.id == s.id,
-                    onClick = { onNavigate(Screen.Source(s.id, title)) },
+                    selected = current is Screen.Bani && current.id == b.id,
+                    onClick = { onNavigate(Screen.Bani(b.id, title)) },
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
             }
@@ -457,6 +473,7 @@ fun HomeScreen(
     onMenu: () -> Unit,
     drawerOpen: Boolean,
     banis: List<Bani>?,
+    sources: List<Source>,
     onOpen: (Screen) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -511,7 +528,7 @@ fun HomeScreen(
                 transitionSpec = { fadeIn() togetherWith fadeOut() }
             ) { idle ->
                 if (idle) {
-                    BanisGrid(Modifier.weight(1f), banis, onOpen = onOpen)
+                    BanisGrid(Modifier.weight(1f), banis, sources, onOpen = onOpen)
                 } else {
                     ResultsList(
                         results, searching,
@@ -606,7 +623,12 @@ private fun SearchField(
 }
 
 @Composable
-fun BanisGrid(modifier: Modifier = Modifier, banis: List<Bani>?, onOpen: (Screen) -> Unit) {
+fun BanisGrid(
+    modifier: Modifier = Modifier,
+    banis: List<Bani>?,
+    sources: List<Source>,
+    onOpen: (Screen) -> Unit,
+) {
     Column(modifier) {
         Text(
             "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ",
@@ -614,15 +636,46 @@ fun BanisGrid(modifier: Modifier = Modifier, banis: List<Bani>?, onOpen: (Screen
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
         )
+        SourcesRow(sources, onOpen)
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 170.dp),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.weight(1f)
         ) {
             items(banis.orEmpty(), key = { it.id }) { b ->
                 BaniCard(b, onOpen)
+            }
+        }
+    }
+}
+
+/** Scripture chips — the browse-by-source entry point lives on the front page. */
+@Composable
+private fun SourcesRow(sources: List<Source>, onOpen: (Screen) -> Unit) {
+    if (sources.isEmpty()) return
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(sources.size) { i ->
+            val s = sources[i]
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.clickable {
+                    onOpen(Screen.Source(s.id, s.nameGuru.ifBlank { s.nameLatin }))
+                }
+            ) {
+                Text(
+                    s.nameGuru.ifBlank { s.nameLatin },
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
             }
         }
     }
