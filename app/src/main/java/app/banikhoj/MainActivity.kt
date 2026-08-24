@@ -1117,8 +1117,8 @@ fun ReaderScreen(
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             LazyColumn(
-                state = listState,
                 Modifier.fillMaxSize(),
+                state = listState,
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
