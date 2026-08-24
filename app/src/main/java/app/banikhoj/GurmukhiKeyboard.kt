@@ -80,9 +80,9 @@ private fun KeyRow(keys: List<String>, onKey: (String) -> Unit) {
 @Composable
 private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shadowElevation = 1.dp,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shadowElevation = 2.dp,
         modifier = modifier.clickable(onClick = onClick)
     ) {
         Column(
@@ -102,9 +102,9 @@ private fun KeyCap(label: String, modifier: Modifier = Modifier, onClick: () -> 
 @Composable
 private fun WideKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shadowElevation = 1.dp,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shadowElevation = 2.dp,
         modifier = modifier.clickable(onClick = onClick)
     ) {
         Column(
@@ -126,9 +126,9 @@ private fun WideKey(label: String, modifier: Modifier = Modifier, onClick: () ->
 private fun BackspaceKey(modifier: Modifier = Modifier, onClick: () -> Unit) {
     val tint = MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shadowElevation = 1.dp,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shadowElevation = 2.dp,
         modifier = modifier.clickable(onClick = onClick)
     ) {
         Column(
