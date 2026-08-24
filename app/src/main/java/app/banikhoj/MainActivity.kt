@@ -17,6 +17,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,10 +32,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items as listItems
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -42,6 +45,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
@@ -85,6 +90,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -105,10 +111,11 @@ import kotlinx.coroutines.withContext
 
 sealed interface Screen {
     data object Home : Screen
-    data class Shabad(val lineId: String) : Screen
+
+    /** Continuous reader over a section (ang) stream, optionally anchored at a shabad. */
+    data class Reader(val sectionId: String, val title: String, val anchor: Int = -1) : Screen
     data class Bani(val id: String, val title: String) : Screen
     data class Source(val id: String, val title: String) : Screen
-    data class Section(val id: String, val title: String) : Screen
 }
 
 /** Width (dp) at which the drawer becomes a permanent sidebar. */
@@ -262,18 +269,46 @@ private fun NavBody(
         when (s) {
             is Screen.Home ->
                 HomeScreen(showMenu, onMenu, backBlockedByDrawer, sources, onOpen = onNavigate)
-            is Screen.Shabad ->
-                ReaderScreen("Shabad", s.lineId, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.shabadOf(it) }
+            is Screen.Reader ->
+                ContinuousReader(s, onBack = { onNavigate(Screen.Home) }, onNavigate = onNavigate)
             is Screen.Bani ->
                 ReaderScreen(s.title, s.id, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.baniLines(it) }
             is Screen.Source ->
                 SourceBrowser(s.id, s.title, onNavigate)
-            is Screen.Section ->
-                // Unified reader: a section opens as one continuous Gurbani stream
-                // with zoom + translation toggle — no intermediate index screen.
-                ReaderScreen(s.title, s.id, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.sectionLines(it) }
         }
     }
+}
+
+private class ReaderContext(val sections: List<Section>, val index: Int)
+
+/** Reader over one section (ang) with prev/next walking the source's section order. */
+@Composable
+private fun ContinuousReader(
+    screen: Screen.Reader,
+    onBack: () -> Unit,
+    onNavigate: (Screen) -> Unit,
+) {
+    val ctx by produceState<ReaderContext?>(null, screen.sectionId) {
+        value = withContext(Dispatchers.IO) {
+            val src = GurbaniDb.sourceOfSection(screen.sectionId).takeIf { it.isNotBlank() }
+                ?: return@withContext null
+            val secs = GurbaniDb.sectionsOf(src)
+            val idx = secs.indexOfFirst { it.id == screen.sectionId }
+            if (idx < 0) null else ReaderContext(secs, idx)
+        }
+    }
+    val sections = ctx?.sections.orEmpty()
+    val idx = ctx?.index ?: -1
+    ReaderScreen(
+        title = screen.title.ifBlank { sections.getOrNull(idx)?.title.orEmpty() },
+        dbKey = screen.sectionId,
+        anchor = screen.anchor,
+        onBack = onBack,
+        onPrev = sections.getOrNull(idx - 1)
+            ?.let { p -> ({ onNavigate(Screen.Reader(p.id, p.title)) }) },
+        onNext = sections.getOrNull(idx + 1)
+            ?.let { n -> ({ onNavigate(Screen.Reader(n.id, n.title)) }) },
+    ) { GurbaniDb.sectionLines(it) }
 }
 
 // ---------- Browse: source -> sections ----------
@@ -315,7 +350,7 @@ fun SourceBrowser(sourceId: String, title: String, onOpen: (Screen) -> Unit) {
                     headlineContent = {
                         Text(sec.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                     },
-                    modifier = Modifier.clickable { onOpen(Screen.Section(sec.id, sec.title)) }
+                    modifier = Modifier.clickable { onOpen(Screen.Reader(sec.id, sec.title)) }
                 )
             }
         }
@@ -337,14 +372,19 @@ private val NITNEM_GROUPS = listOf(
             NitnemEntry("jaap", "Jaap Sahib"),
             NitnemEntry("savaiye", "Tav Prasad Savaiye"),
             NitnemEntry("chaupai", "Benti Chaupai Sahib"),
+            NitnemEntry("anand", "Anand Sahib"),
         )
     ),
     NitnemGroup(
-        "Evening · Nitnem",
+        "Evening · Sunset",
         listOf(
             NitnemEntry("rehras", "Rehras Sahib"),
-            NitnemEntry("sohila", "Sohila Sahib"),
-            NitnemEntry("ardaas", "Ardaas"),
+        )
+    ),
+    NitnemGroup(
+        "Night · Bedtime",
+        listOf(
+            NitnemEntry("sohila", "Kirtan Sohila"),
         )
     ),
 )
@@ -478,19 +518,23 @@ fun HomeScreen(
     sources: List<Source>,
     onOpen: (Screen) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
+    var mode by rememberSaveable { mutableIntStateOf(SearchMode.PARTIAL.code) }
     var results by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var keyboardOn by rememberSaveable { mutableStateOf(true) }
 
-    LaunchedEffect(query) {
-        if (query.isBlank()) {
+    LaunchedEffect(query, mode) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
             results = emptyList()
             searching = false
         } else {
             searching = true
             delay(220)
-            results = withContext(Dispatchers.IO) { GurbaniDb.search(query.trim()) }
+            val m = SearchMode.entries.firstOrNull { it.code == mode } ?: SearchMode.PARTIAL
+            results = withContext(Dispatchers.IO) { GurbaniDb.search(trimmed, mode = m) }
             searching = false
         }
     }
@@ -524,6 +568,14 @@ fun HomeScreen(
                 onClear = { query = "" }
             )
 
+            AnimatedVisibility(query.isNotBlank()) {
+                ModeChips(
+                    selected = mode,
+                    onSelect = { mode = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                )
+            }
+
             AnimatedContent(
                 targetState = query.isBlank(),
                 label = "homeBody",
@@ -535,7 +587,17 @@ fun HomeScreen(
                     ResultsList(
                         results, searching,
                         Modifier.weight(1f),
-                        onOpen = onOpen
+                        onResultTap = { r ->
+                            scope.launch {
+                                val loc = withContext(Dispatchers.IO) { GurbaniDb.locateLine(r.lineId) }
+                                    ?: return@launch
+                                val title = withContext(Dispatchers.IO) {
+                                    GurbaniDb.sectionsOf(loc.sourceId)
+                                        .firstOrNull { it.id == loc.sectionId }?.title
+                                }.orEmpty().ifBlank { "ਸ਼ਬਦ" }
+                                onOpen(Screen.Reader(loc.sectionId, title, loc.anchor))
+                            }
+                        }
                     )
                 }
             }
@@ -660,9 +722,19 @@ fun SourcesGrid(
     }
 }
 
+/** Scriptures whose name ends in "Granth" (or ਗ੍ਰੰਥ) carry the honorific Sri / ਸ੍ਰੀ prefix. */
+private fun sourceTitle(nameGuru: String, nameLatin: String): String {
+    val guru = nameGuru.trim()
+    if (guru.isNotEmpty()) {
+        return if (guru.endsWith("ਗ੍ਰੰਥ") && !guru.startsWith("ਸ੍ਰੀ")) "ਸ੍ਰੀ $guru" else guru
+    }
+    val latin = nameLatin.trim()
+    return if (latin.endsWith("Granth") && !latin.startsWith("Sri ")) "Sri $latin" else latin
+}
+
 @Composable
 private fun SourceCard(s: Source, onOpen: (Screen) -> Unit) {
-    val title = s.nameGuru.ifBlank { s.nameLatin }
+    val title = sourceTitle(s.nameGuru, s.nameLatin)
     Card(
         onClick = { onOpen(Screen.Source(s.id, title)) },
         shape = RoundedCornerShape(18.dp),
@@ -709,11 +781,49 @@ private fun SourceCard(s: Source, onOpen: (Screen) -> Unit) {
 }
 
 @Composable
+private fun ModeChips(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val labels = listOf(
+        SearchMode.PARTIAL to "ਭਾਗ · Part",
+        SearchMode.FIRST_START to "ਅੱਖਰ · Start",
+        SearchMode.FIRST_ANY to "ਅੱਖਰ · Anywhere",
+        SearchMode.FULL_WORD to "ਸ਼ਬਦ · Word",
+        SearchMode.EXACT to "ਪੂਰਾ · Exact",
+    )
+    Row(
+        modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        labels.forEach { (mode, label) ->
+            val on = mode.code == selected
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (on) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerLow
+                    )
+                    .clickable { onSelect(mode.code) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    label,
+                    fontSize = 13.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (on) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun ResultsList(
     results: List<SearchResult>,
     searching: Boolean,
     modifier: Modifier = Modifier,
-    onOpen: (Screen) -> Unit,
+    onResultTap: (SearchResult) -> Unit,
 ) {
     Column(modifier) {
         Text(
@@ -764,7 +874,7 @@ fun ResultsList(
                             { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                         },
                         modifier = Modifier
-                            .clickable { onOpen(Screen.Shabad(r.lineId)) }
+                            .clickable { onResultTap(r) }
                     )
                 }
             }
@@ -774,27 +884,46 @@ fun ResultsList(
 
 // ---------- Punctuation-aware Gurmukhi text ----------
 
-/** Traditional dandas and Shabad OS visraam variation selectors. */
-private fun isTraditionalMark(c: Char): Boolean =
-    c == '।' || c == '॥' || c == '\uFE00' || c == '\uFE01' || c == '\uFE02' || c == '\uFE03'
+// Visraam colour levels (hex codes from STTM parser: $sttm-vishraam-red/yellow).
+private const val LEVEL_NONE = 0
+private const val LEVEL_ACCENT = 1
+private const val LEVEL_MEDIUM = 2 // #FFC500
+private const val LEVEL_HEAVY = 3  // #C0392B
 
-/** Western punctuation — hidden from display. */
-private fun isWesternMark(c: Char): Boolean =
-    c in ";.,:"
+/** Traditional dandas plus traditional visraam selectors — always rendered untouched. */
+private fun isTraditionalMark(c: Char): Boolean =
+    c == '।' || c == '॥' || c == '\uFE00' || c == '\uFE01'
+
+/** Synthetic visraam selectors — hidden from display; the word before takes their colour. */
+private fun isSyntheticSelector(c: Char): Boolean =
+    c == '\uFE02' || c == '\uFE03'
+
+private fun selectorLevel(c: Char): Int =
+    if (c == '\uFE02') LEVEL_HEAVY else LEVEL_MEDIUM
+
+/** Western marks are hidden; ; is a heavy pause, : medium, others keep the generic accent. */
+private fun westernLevel(c: Char): Int = when (c) {
+    ';' -> LEVEL_HEAVY
+    ':' -> LEVEL_MEDIUM
+    else -> LEVEL_ACCENT
+}
+
+private fun isHiddenMark(c: Char): Boolean =
+    isSyntheticSelector(c) || c in ";.,:"
 
 /** Footnote subscript digits — displayed as-is. */
 private fun isSubscript(c: Char): Boolean =
     c in "₀₁₂₃₄₅₆₇₈₉"
 
 private fun isAnyMark(c: Char): Boolean =
-    isTraditionalMark(c) || isWesternMark(c) || isSubscript(c)
+    isTraditionalMark(c) || isHiddenMark(c) || isSubscript(c)
 
 /**
- * Rendering rules:
- *  - traditional dandas, visraam selectors and subscript digits render exactly
- *    as written, with no font or colour change to the word before them;
- *  - western marks (; , :) are hidden from display, and the word immediately
- *    before them takes the accent colour.
+ * Rendering rules (STTM-style visraam colours):
+ *  - traditional dandas/selectors and subscript digits render exactly as written;
+ *  - hidden marks (; , : and synthetic selectors FE02/FE03) are invisible, and the
+ *    word immediately before them takes the strongest colour found in the mark run
+ *    (heavy #C0392B > medium #FFC500 > accent).
  */
 @Composable
 fun GurmukhiText(
@@ -806,9 +935,11 @@ fun GurmukhiText(
     maxLines: Int = Int.MAX_VALUE,
 ) {
     val accent = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-    val annotated = remember(text, accent) {
+    val heavyColor = Color(0xFFC0392B)
+    val mediumColor = Color(0xFFFFC500)
+    val annotated = remember(text, accent, heavyColor, mediumColor) {
         val n = text.length
-        val accentWord = BooleanArray(n)
+        val level = IntArray(n)
 
         var i = 0
         while (i < n) {
@@ -818,22 +949,30 @@ fun GurmukhiText(
             }
             var j = i + 1
             while (j < n && isAnyMark(text[j])) j++
-            val runHasHidden = (i until j).any { isWesternMark(text[it]) }
+
+            var runLevel = LEVEL_NONE
+            for (k in i until j) {
+                if (isSyntheticSelector(text[k])) {
+                    runLevel = maxOf(runLevel, selectorLevel(text[k]))
+                } else if (text[k] in ";.,:") {
+                    runLevel = maxOf(runLevel, westernLevel(text[k]))
+                }
+            }
 
             // Walk back from the run through its word (skipping one gap if needed).
-            if (runHasHidden) {
+            if (runLevel != LEVEL_NONE) {
                 var s = j - 1
                 var sawWord = false
                 while (s >= 0) {
                     val ch = text[s]
-                    if (accentWord[s]) break          // already claimed by an earlier mark
+                    if (level[s] != LEVEL_NONE) break     // already claimed by an earlier mark
                     if (ch == ' ') { if (sawWord) break; s--; continue }
                     if (isAnyMark(ch)) { s--; continue } // the mark run itself
                     s--
                     sawWord = true
                 }
                 if (sawWord) {
-                    for (t in (s + 1) until i) accentWord[t] = true
+                    for (t in (s + 1) until i) level[t] = runLevel
                 }
             }
             i = j
@@ -843,8 +982,10 @@ fun GurmukhiText(
             for (idx in text.indices) {
                 val c = text[idx]
                 when {
-                    isWesternMark(c) -> { /* glyph hidden */ }
-                    accentWord[idx] -> withStyle(SpanStyle(color = accent)) { append(c) }
+                    isHiddenMark(c) -> { /* glyph hidden */ }
+                    level[idx] == LEVEL_HEAVY -> withStyle(SpanStyle(color = heavyColor)) { append(c) }
+                    level[idx] == LEVEL_MEDIUM -> withStyle(SpanStyle(color = mediumColor)) { append(c) }
+                    level[idx] == LEVEL_ACCENT -> withStyle(SpanStyle(color = accent)) { append(c) }
                     else -> append(c) // traditional marks & subscripts render untouched
                 }
             }
@@ -868,12 +1009,26 @@ private const val DOUBLE_TAP_SCALE = 1.5f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (String) -> List<Line>) {
+fun ReaderScreen(
+    title: String,
+    dbKey: String,
+    anchor: Int = -1,
+    onBack: () -> Unit,
+    onPrev: (() -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
+    loader: (String) -> List<Line>,
+) {
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences(PREFS_READER, Context.MODE_PRIVATE) }
 
     val lines by produceState<List<Line>>(emptyList(), dbKey) {
         value = withContext(Dispatchers.IO) { loader(dbKey) }
+    }
+    val listState = rememberLazyListState()
+    LaunchedEffect(lines, anchor) {
+        if (anchor >= 0 && lines.isNotEmpty()) {
+            listState.scrollToItem(anchor.coerceAtMost(lines.size - 1))
+        }
     }
 
     // Translation languages actually available for this content; cycle off → EN → PA.
@@ -936,10 +1091,33 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
                     containerColor = Color.Transparent
                 )
             )
+        },
+        bottomBar = {
+            if (onPrev != null || onNext != null) {
+                Surface(tonalElevation = 3.dp) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = onPrev ?: {}, enabled = onPrev != null) {
+                            Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = null, Modifier.size(20.dp))
+                            Spacer(Modifier.width(2.dp))
+                            Text("ਪਿਛਲਾ")
+                        }
+                        TextButton(onClick = onNext ?: {}, enabled = onNext != null) {
+                            Text("ਅਗਲਾ")
+                            Spacer(Modifier.width(2.dp))
+                            Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
         }
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             LazyColumn(
+                state = listState,
                 Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)

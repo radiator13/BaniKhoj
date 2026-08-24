@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 pub const CACHE_MAGIC: &[u8; 4] = b"BKID";
-const CACHE_VERSION: u32 = 5;
+const CACHE_VERSION: u32 = 6;
 
 /// Translation sources per language, in fallback order.
 pub const EN_CHAIN: &[&str] = &["DSSK", "DSKO", "SBMS"];
@@ -42,6 +42,77 @@ pub struct Row {
     pub id: String,
     pub gu: String,
     pub tr: Translations,
+    /// Word-initial letters of `gu` — powers the first-letter search modes.
+    pub fls: String,
+}
+
+/// Gurmukhi search modes; numeric codes cross the JNI boundary from Kotlin.
+#[derive(Clone, Copy)]
+enum SearchMode {
+    Substring,
+    FirstStart,
+    FirstAny,
+    FullWord,
+    ExactPhrase,
+}
+
+impl SearchMode {
+    fn from_code(code: u8) -> Self {
+        match code {
+            1 => SearchMode::FirstStart,
+            2 => SearchMode::FirstAny,
+            3 => SearchMode::FullWord,
+            4 => SearchMode::ExactPhrase,
+            _ => SearchMode::Substring,
+        }
+    }
+}
+
+/// Punctuation and visraam marks — never part of a word's letters.
+fn is_mark_char(c: char) -> bool {
+    matches!(c, ';' | ',' | ':' | '.' | '।' | '॥' | '₀'..='₉')
+        || ('\u{FE00}'..='\u{FE03}').contains(&c)
+}
+
+/// First letter of every whitespace-separated word in `s`.
+fn first_letters(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() / 4);
+    let mut at_start = true;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            at_start = true;
+        } else if is_mark_char(c) {
+            // skipped; does not clear the word-start flag
+        } else if at_start {
+            out.push(c);
+            at_start = false;
+        }
+    }
+    out
+}
+
+/// Marks stripped and whitespace collapsed — canonical form for phrase matching.
+fn normalize_gu(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_space = true;
+    for c in s.chars() {
+        if is_mark_char(c) {
+            continue;
+        }
+        if c.is_whitespace() {
+            if !prev_space {
+                out.push(' ');
+                prev_space = true;
+            }
+        } else {
+            out.push(c);
+            prev_space = false;
+        }
+    }
+    while out.ends_with(' ') {
+        out.pop();
+    }
+    out
 }
 
 pub struct Core {
@@ -96,6 +167,104 @@ impl Core {
             .filter(|r| finder.find(r.gu.as_bytes()).is_some())
             .take(limit)
             .collect()
+    }
+
+    /// Mode-aware search entry point used by the JNI bridge.
+    pub fn search_mode(&self, q: &str, limit: usize, mode: u8) -> Vec<&Row> {
+        match SearchMode::from_code(mode) {
+            SearchMode::Substring => self.search(q, limit),
+            SearchMode::FirstStart => {
+                let needle = first_letters(q);
+                if needle.is_empty() {
+                    return Vec::new();
+                }
+                self.rows
+                    .iter()
+                    .filter(|r| r.fls.starts_with(&needle))
+                    .take(limit)
+                    .collect()
+            }
+            SearchMode::FirstAny => {
+                let needle = first_letters(q);
+                if needle.is_empty() {
+                    return Vec::new();
+                }
+                let finder = memmem::Finder::new(needle.as_bytes());
+                self.rows
+                    .iter()
+                    .filter(|r| finder.find(r.fls.as_bytes()).is_some())
+                    .take(limit)
+                    .collect()
+            }
+            SearchMode::FullWord => {
+                let norm_q = normalize_gu(q);
+                let words: Vec<&str> = norm_q.split_whitespace().collect();
+                if words.is_empty() {
+                    return Vec::new();
+                }
+                self.rows
+                    .iter()
+                    .filter(|r| {
+                        let norm = normalize_gu(&r.gu);
+                        words.iter().all(|w| norm.split_whitespace().any(|t| t == *w))
+                    })
+                    .take(limit)
+                    .collect()
+            }
+            SearchMode::ExactPhrase => {
+                let needle = normalize_gu(q);
+                if needle.is_empty() {
+                    return Vec::new();
+                }
+                let finder = memmem::Finder::new(needle.as_bytes());
+                self.rows
+                    .iter()
+                    .filter(|r| finder.find(normalize_gu(&r.gu).as_bytes()).is_some())
+                    .take(limit)
+                    .collect()
+            }
+        }
+    }
+
+    /// Source id owning a section.
+    pub fn source_of_section(&self, section_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT source_id FROM sections WHERE id = ?1",
+                [section_id],
+                |r| r.get(0),
+            )
+            .ok()
+    }
+
+    /// Section containing `line_id`, its source, and how many shabads precede
+    /// the line's own shabad inside that section — enough to open the continuous
+    /// reader anchored at the right shabad.
+    pub fn locate_line(&self, line_id: &str) -> Option<(String, String, usize)> {
+        let (sec, src, sord, lgid): (String, String, i64, String) = self
+            .conn
+            .query_row(
+                "SELECT lg.section_id, sec.source_id, lg.section_order, lg.id
+                 FROM lines l
+                 JOIN line_groups lg ON lg.id = l.line_group_id
+                 JOIN sections sec ON sec.id = lg.section_id
+                 WHERE l.id = ?1",
+                [line_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .ok()?;
+
+        let before: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(DISTINCT lg2.id) FROM line_groups lg2
+                 WHERE lg2.section_id = ?1 AND (lg2.section_order, lg2.id) < (?2, ?3)",
+                rusqlite::params![sec, sord, lgid],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        Some((src, sec, before.max(0) as usize))
     }
 
     /// All banis in table order as (id, name-json, has_english_majority).
@@ -356,9 +525,11 @@ fn build_index(conn: &Connection) -> Result<Vec<Row>, String> {
     let mut rows = Vec::with_capacity(order.len());
     for (_, id) in order {
         if let Some((gu, t)) = best.remove(&id) {
+            let fls = first_letters(&gu);
             rows.push(Row {
                 id,
                 gu,
+                fls,
                 tr: Translations {
                     en: Translations::pick(&t, EN_CHAIN),
                     pa: Translations::pick(&t, PA_CHAIN),
@@ -427,9 +598,10 @@ fn load_cache(path: &Path, fp: &(u64, u64)) -> Option<Vec<Row>> {
     for _ in 0..count {
         let id = c.string()?;
         let gu = c.string()?;
+        let fls = c.string()?;
         let en = if c.u32()? == 1 { c.string()? } else { String::new() };
         let pa = if c.u32()? == 1 { c.string()? } else { String::new() };
-        rows.push(Row { id, gu, tr: Translations { en, pa } });
+        rows.push(Row { id, gu, fls, tr: Translations { en, pa } });
     }
     Some(rows)
 }
@@ -442,7 +614,7 @@ fn write_cache(path: &Path, rows: &[Row], fp: &(u64, u64)) {
     v.extend_from_slice(&fp.1.to_le_bytes());
     put_u32(&mut v, rows.len() as u32);
     for r in rows {
-        for s in [&r.id, &r.gu] {
+        for s in [&r.id, &r.gu, &r.fls] {
             put_u32(&mut v, s.len() as u32);
             v.extend_from_slice(s.as_bytes());
         }

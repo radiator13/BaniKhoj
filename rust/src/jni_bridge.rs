@@ -64,11 +64,12 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSearch<'l>(
     _class: JClass,
     q: JString,
     limit: jint,
+    mode: jint,
 ) -> JString<'l> {
     let query = env.get_string(&q).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let out = with_core(
         |c| {
-            let hits = c.search(&query, limit.max(0) as usize);
+            let hits = c.search_mode(&query, limit.max(0) as usize, mode.max(0) as u8);
             search_json(&hits)
         },
         "[]".to_string(),
@@ -101,13 +102,35 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeBanis<'l>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeShabad<'l>(
+pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeLocateLine<'l>(
     mut env: JNIEnv<'l>,
     _class: JClass,
     line_id: JString,
 ) -> JString<'l> {
     let id = env.get_string(&line_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let out = with_core(|c| lines_json(&c.shabad(&id)), "[]".to_string());
+    let out = with_core(
+        |c| match c.locate_line(&id) {
+            Some((src, sec, anchor)) => format!(
+                "{{\"src\":\"{}\",\"sec\":\"{}\",\"anchor\":{}}}",
+                crate::esc(&src),
+                crate::esc(&sec),
+                anchor
+            ),
+            None => String::new(),
+        },
+        String::new(),
+    );
+    jstr(&mut env, out)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSourceOfSection<'l>(
+    mut env: JNIEnv<'l>,
+    _class: JClass,
+    section_id: JString,
+) -> JString<'l> {
+    let id = env.get_string(&section_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let out = with_core(|c| c.source_of_section(&id).unwrap_or_default(), String::new());
     jstr(&mut env, out)
 }
 

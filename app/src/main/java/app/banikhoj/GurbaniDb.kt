@@ -23,6 +23,18 @@ enum class ReaderLang(val code: String, val label: String) {
     PA("pa", "ਪੰ");
 }
 data class SearchResult(val lineId: String, val gurmukhi: String, val english: String)
+
+/** Gurmukhi search modes; [code] crosses the JNI boundary — keep in sync with Rust. */
+enum class SearchMode(val code: Int) {
+    PARTIAL(0),
+    FIRST_START(1),
+    FIRST_ANY(2),
+    FULL_WORD(3),
+    EXACT(4),
+}
+
+/** Where a line lives: its section (ang) plus how many shabads precede it there. */
+data class LineLocation(val sourceId: String, val sectionId: String, val anchor: Int)
 data class Bani(val id: String, val nameGuru: String, val nameLatin: String, val hasEnglish: Boolean)
 data class Source(val id: String, val nameGuru: String, val nameLatin: String)
 data class Section(val id: String, val title: String)
@@ -70,17 +82,27 @@ object GurbaniDb {
         }
     }
 
-    fun search(q: String, limit: Int = 100): List<SearchResult> {
+    fun search(q: String, limit: Int = 100, mode: SearchMode = SearchMode.PARTIAL): List<SearchResult> {
         if (q.isBlank()) return emptyList()
-        val arr = JSONArray(nativeSearch(q.trim(), limit))
+        val arr = JSONArray(nativeSearch(q.trim(), limit, mode.code))
         return List(arr.length()) { i ->
             val o = arr.getJSONObject(i)
             SearchResult(o.getString("id"), o.getString("gu"), o.getString("en"))
         }
     }
 
-    fun shabadOf(lineId: String): List<Line> =
-        nativeShabad(lineId).toLines()
+    /** Section (ang) + source + shabad anchor for a line; null when unknown. */
+    fun locateLine(lineId: String): LineLocation? {
+        val raw = runCatching { nativeLocateLine(lineId) }.getOrNull().orEmpty()
+        if (raw.isEmpty()) return null
+        val o = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+        val sec = o.optString("sec")
+        if (sec.isEmpty()) return null
+        return LineLocation(o.optString("src"), sec, o.optInt("anchor"))
+    }
+
+    fun sourceOfSection(sectionId: String): String =
+        runCatching { nativeSourceOfSection(sectionId) }.getOrDefault("")
 
     fun banis(): List<Bani> {
         val arr = JSONArray(nativeBanis())
@@ -159,9 +181,10 @@ object GurbaniDb {
     }
 
     private external fun nativeInit(dbPath: String, xzPath: String, idxPath: String): Boolean
-    private external fun nativeSearch(query: String, limit: Int): String
+    private external fun nativeSearch(query: String, limit: Int, mode: Int): String
+    private external fun nativeLocateLine(lineId: String): String
+    private external fun nativeSourceOfSection(sectionId: String): String
     private external fun nativeBanis(): String
-    private external fun nativeShabad(lineId: String): String
     private external fun nativeBani(baniId: String): String
     private external fun nativeSources(): String
     private external fun nativeSections(sourceId: String): String
