@@ -219,35 +219,28 @@ impl Core {
         out
     }
 
-    /// First line id + opening text of every shabad in a section, in order.
-    pub fn section_shabads(&self, section_id: &str) -> Vec<(String, String)> {
-        let sql = "
-            SELECT lg.id, l.id, COALESCE(p.data, '')
-            FROM line_groups lg
-            JOIN lines l ON l.line_group_id = lg.id
+    /// All lines of every shabad in a section, as one continuous stream.
+    pub fn section_lines(&self, section_id: &str) -> Vec<(String, Translations, String)> {
+        read_lines(
+            &self.conn,
+            "
+            SELECT COALESCE(p.data, ''), COALESCE(sec.name, ''), en.asset_id, COALESCE(en.data, '')
+            FROM lines l
+            JOIN line_groups lg ON lg.id = l.line_group_id
+            LEFT JOIN sections sec ON sec.id = lg.section_id
             JOIN asset_lines p ON p.line_id = l.id AND p.type = 'primary'
                   AND NOT EXISTS (
                         SELECT 1 FROM asset_lines q
                         WHERE q.line_id = p.line_id AND q.type = 'primary'
                           AND (q.priority < p.priority
                                OR (q.priority = p.priority AND q.rowid < p.rowid)))
+            LEFT JOIN asset_lines en ON en.line_id = l.id AND en.type = 'translation'
+                  AND en.asset_id IN ('DSSK','DSKO','SBMS','PSST','NKFT','RSJD')
             WHERE lg.section_id = ?1
-            ORDER BY lg.section_order, l.line_group_order";
-        let mut out: Vec<(String, String)> = Vec::new();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        if let Ok(mut stmt) = self.conn.prepare(sql) {
-            if let Ok(mut rows) = stmt.query([section_id]) {
-                while let Ok(Some(r)) = rows.next() {
-                    let gid: String = match r.get(0) { Ok(v) => v, Err(_) => continue };
-                    if !seen.insert(gid) { continue; } // first line wins per shabad
-                    let lid: String = match r.get(1) { Ok(v) => v, Err(_) => continue };
-                    let gu: String =
-                        r.get::<_, Option<String>>(2).ok().flatten().unwrap_or_default();
-                    out.push((lid, gu));
-                }
-            }
-        }
-        out
+            ORDER BY lg.section_order, l.line_group_order
+            ",
+            [section_id],
+        )
     }
 }
 

@@ -26,7 +26,6 @@ data class SearchResult(val lineId: String, val gurmukhi: String, val english: S
 data class Bani(val id: String, val nameGuru: String, val nameLatin: String, val hasEnglish: Boolean)
 data class Source(val id: String, val nameGuru: String, val nameLatin: String)
 data class Section(val id: String, val title: String)
-data class ShabadEntry(val lineId: String, val gurmukhi: String)
 
 /**
  * Thin JNI wrapper over the native Rust core (`rust/` crate, libgurbanidb.so).
@@ -127,14 +126,9 @@ object GurbaniDb {
         }
     }
 
-    /** Opening line of every shabad in a section. */
-    fun shabadsOf(sectionId: String): List<ShabadEntry> {
-        val arr = JSONArray(nativeSectionShabads(sectionId))
-        return List(arr.length()) { i ->
-            val p = arr.getJSONArray(i)
-            ShabadEntry(p.getString(0), p.optString(1))
-        }
-    }
+    /** Every line of a section as one continuous stream for the unified reader. */
+    fun sectionLines(sectionId: String): List<Line> =
+        nativeSectionLines(sectionId).toLines()
 
     fun close() {
         synchronized(lock) {
@@ -171,6 +165,6 @@ object GurbaniDb {
     private external fun nativeBani(baniId: String): String
     private external fun nativeSources(): String
     private external fun nativeSections(sourceId: String): String
-    private external fun nativeSectionShabads(sectionId: String): String
+    private external fun nativeSectionLines(sectionId: String): String
     private external fun nativeClose()
 }

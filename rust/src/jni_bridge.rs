@@ -144,27 +144,14 @@ pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSections<'l>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSectionShabads<'l>(
+pub extern "system" fn Java_app_banikhoj_GurbaniDb_nativeSectionLines<'l>(
     mut env: JNIEnv<'l>,
     _class: JClass,
     section_id: JString,
 ) -> JString<'l> {
     let id = env.get_string(&section_id).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    // [[line_id, gurmukhi], ...]
-    let pairs = with_core(|c| c.section_shabads(&id), Vec::new());
-    let mut o = String::from("[");
-    for (i, (lid, gu)) in pairs.iter().enumerate() {
-        if i > 0 {
-            o.push(',');
-        }
-        o.push_str("[\"");
-        o.push_str(&crate::esc(lid));
-        o.push_str("\",\"");
-        o.push_str(&crate::esc(gu));
-        o.push_str("\"]");
-    }
-    o.push(']');
-    jstr(&mut env, o)
+    let out = with_core(|c| lines_json(&c.section_lines(&id)), "[]".to_string());
+    jstr(&mut env, out)
 }
 
 /// [[id, name-json], ...]

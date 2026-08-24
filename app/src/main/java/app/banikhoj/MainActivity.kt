@@ -271,12 +271,14 @@ private fun NavBody(
             is Screen.Source ->
                 SourceBrowser(s.id, s.title, onNavigate)
             is Screen.Section ->
-                ShabadListScreen(s.id, s.title, onNavigate)
+                // Unified reader: a section opens as one continuous Gurbani stream
+                // with zoom + translation toggle — no intermediate index screen.
+                ReaderScreen(s.title, s.id, onBack = { onNavigate(Screen.Home) }) { GurbaniDb.sectionLines(it) }
         }
     }
 }
 
-// ---------- Browse: source -> sections -> shabads ----------
+// ---------- Browse: source -> sections ----------
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -316,30 +318,6 @@ fun SourceBrowser(sourceId: String, title: String, onOpen: (Screen) -> Unit) {
                         Text(sec.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                     },
                     modifier = Modifier.clickable { onOpen(Screen.Section(sec.id, sec.title)) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ShabadListScreen(sectionId: String, title: String, onOpen: (Screen) -> Unit) {
-    val shabads by produceState<List<ShabadEntry>>(emptyList(), sectionId) {
-        value = withContext(Dispatchers.IO) { GurbaniDb.shabadsOf(sectionId) }
-    }
-    BrowserScaffold(title = title, onBack = { onOpen(Screen.Home) }) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
-        ) {
-            items(shabads.size) { i ->
-                val e = shabads[i]
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    headlineContent = {
-                        GurmukhiText(e.gurmukhi, fontSize = 18.sp, lineHeight = 28.sp, maxLines = 2)
-                    },
-                    modifier = Modifier.clickable { onOpen(Screen.Shabad(e.lineId)) }
                 )
             }
         }
