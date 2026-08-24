@@ -645,10 +645,11 @@ private fun isAnyMark(c: Char): Boolean =
     isTraditionalMark(c) || isWesternMark(c)
 
 /**
- * Rendering rules, applied uniformly:
- *  - every mark glyph is hidden from display;
- *  - the word before a *western* mark (; , . :) takes the accent colour;
- *  - the word before a *traditional* visraam keeps the default font.
+ * Rendering rules:
+ *  - traditional dandas and visraam selectors are kept exactly as written,
+ *    with no font or colour change to the word before them;
+ *  - western marks (; , . : and footnote digits) are hidden from display,
+ *    and the word immediately before them takes the accent colour.
  */
 @Composable
 fun GurmukhiText(
@@ -697,9 +698,9 @@ fun GurmukhiText(
             for (idx in text.indices) {
                 val c = text[idx]
                 when {
-                    isAnyMark(c) -> { /* glyph hidden */ }
+                    isWesternMark(c) -> { /* glyph hidden */ }
                     accentWord[idx] -> withStyle(SpanStyle(color = accent)) { append(c) }
-                    else -> append(c)
+                    else -> append(c) // traditional marks render untouched
                 }
             }
         }
