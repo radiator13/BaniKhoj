@@ -39,7 +39,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -92,7 +91,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyleimport androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -820,10 +820,12 @@ fun ReaderScreen(title: String, dbKey: String, onBack: () -> Unit, loader: (Stri
                 },
                 actions = {
                     IconButton(onClick = { stepZoom(1f / 1.15f) }) {
-                        Icon(Icons.Filled.Remove, contentDescription = "Zoom out")
+                        Text("A−", fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick = { stepZoom(1.15f) }) {
-                        Icon(Icons.Filled.Add, contentDescription = "Zoom in")
+                        Text("A+", fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = { cycleLang() }) {
                         Text(
